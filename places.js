@@ -744,7 +744,7 @@
     }
   }
 
-  // Re-encoding removes the source image EXIF/XMP and original filename; visible content may still identify people or locations.
+  // Re-encoding strips embedded image EXIF/XMP; the selected filename is retained separately as attachment metadata.
   function anonymousMediaName(prefix, extension) {
     const random = new Uint8Array(8);
     crypto.getRandomValues(random);
@@ -787,7 +787,7 @@
             name: anonymousMediaName("video", file.type === "video/webm" ? "webm" : file.type === "video/quicktime" ? "mov" : "mp4")
           };
           if (!stillEditing()) break;
-          const entry = await window.FALocalStore.saveAttachment(prepared.blob, {name:prepared.name});
+          const entry = await window.FALocalStore.saveAttachment(prepared.blob, {name:file.name || prepared.name});
           if (!stillEditing()) {
             await window.FALocalStore.deleteUnreferencedAttachments([entry.id]);
             break;
