@@ -10,6 +10,25 @@
   const enc = new TextEncoder(), dec = new TextDecoder();
   const POLL_MS = 30000, DEBOUNCE_MS = 900, MAX_MEDIA_BYTES = 12 * 1024 * 1024;
   let lastMediaSnapshot = "";
+  // References are trusted only for the exact encrypted Git blob SHA.
+  // They never contain attachment bytes or original filenames.
+  const verifiedPlaceRefs = new Map();
+  function rememberVerifiedPlaceRefs(path,sha,payload) {
+    const match=/^research\/places\/([^/]+)\.bin$/.exec(path);
+    if(!match || payload?.v!==1 || payload?.collection!=="places" || payload?.id!==match[1])
+      throw new Error("Cannot verify encrypted POI attachment references.");
+    const refs=[];
+    if(!payload.deleted){
+      if(!payload.record || !Array.isArray(payload.record.attachments||[]) || (payload.record.id && payload.record.id!==match[1]))
+        throw new Error("Cannot verify encrypted POI attachments: invalid record.");
+      for(const item of payload.record.attachments||[]){
+        const id=String(item?.id||"");
+        if(!/^[a-zA-Z0-9_-]{8,100}$/.test(id))throw new Error("Cannot verify encrypted POI attachments: invalid reference.");
+        refs.push(filePath("media",id));
+      }
+    }
+    verifiedPlaceRefs.set(path,{sha,refs});
+  }
 
   let connection = null, active = false, syncing = null, delayTimer = null, pollTimer = null, needsResync = false;
   let onChange = () => {}, onStatus = () => {}, onProgress = () => {};
@@ -76,7 +95,10 @@
   async function readBlob(path,sha) {
     const blob=await request(`${baseUrl()}/git/blobs/${sha}`);
     if(blob.encoding!=="base64" || !blob.content)throw new Error(`GitHub did not return attachment bytes for ${path}.`);
-    return decrypt(path,fromBase64(blob.content));
+    const plain=await decrypt(path,fromBase64(blob.content));
+    if(/^research\/places\/[^/]+\.bin$/.test(path))
+      rememberVerifiedPlaceRefs(path,sha,JSON.parse(dec.decode(plain)));
+    return plain;
   }
   async function writeBlob(path,plaintext,sha) {
     const encrypted=await encrypt(path,plaintext);
@@ -103,7 +125,7 @@
     for(const f of response.tree||[])if(f.type==="blob" && /^research\/(?:places|media)\/[^/]+\.bin$/.test(f.path))files.set(f.path,f.sha);
     return {head,treeSha,files};
   }
-  async function remoteMediaReferences(files,progress=null) {
+  async function fetchRemoteMediaReferences(files,progress=null) {
     const entries=[...files].filter(([path])=>/^research\/places\/[^/]+\.bin$/.test(path));
     const references=new Set();
     let cursor=0,checked=0,stopped=false;
@@ -133,6 +155,26 @@
     if(failed)throw failed.reason; // Never delete media if any POI could not be verified.
     return references;
   }
+  // Reuse verified references from the initial pull only while GitHub's SHA matches.
+  // Any missing or changed record falls back to the original complete verification.
+  async function remoteMediaReferences(files,progress=null) {
+    const unresolved=new Map(),refs=new Set();
+    let cachedCount=0,total=0;
+    for(const [path,sha] of files){
+      if(!/^research\/places\/[^/]+\.bin$/.test(path))continue;
+      total++;
+      const entry=verifiedPlaceRefs.get(path);
+      if(entry?.sha!==sha){unresolved.set(path,sha);continue;}
+      for(const ref of entry.refs)refs.add(ref);
+      cachedCount++;
+    }
+    if(progress)progress(cachedCount,total);
+    if(unresolved.size){
+      const verified=await fetchRemoteMediaReferences(unresolved,progress?(count)=>progress(cachedCount+count,total):null);
+      for(const ref of verified)refs.add(ref);
+    }
+    return refs;
+  }
   async function deleteRemoteFile(path,sha,message) {
     const result=await request(`${baseUrl()}/contents/${path.split("/").map(encodeURIComponent).join("/")}`,{
       method:"DELETE",body:{message,sha,branch:connection.branch}
@@ -140,6 +182,7 @@
     if(!/^[a-f0-9]{40}$/i.test(result.commit?.sha||""))
       throw new Error(`GitHub did not confirm deletion of ${path}.`);
     remoteFiles.delete(path);
+    verifiedPlaceRefs.delete(path);
     return result.commit.sha;
   }
   async function cleanUnusedMedia(progress=null) {
@@ -217,6 +260,12 @@
       const collection="places",id=match[1];
       const known=await storage.metadata(path);
       if(known?.sha===sha){
+        // The local copy matches this exact Git SHA unless a local edit is pending.
+        const cached=verifiedPlaceRefs.get(path);
+        if(cached?.sha!==sha && !await storage.readOne("sync_outbox",`${collection}:${id}`)){
+          const saved=await storage.readOne(collection,id);
+          if(saved?.id===id)rememberVerifiedPlaceRefs(path,sha,{v:1,id,collection,record:saved});
+        }
         // Keep recognizing legacy deletion markers already cached by old builds.
         if(!await storage.readOne(collection,id)){
           const previous=JSON.parse(dec.decode(await readBlob(path,sha)));
@@ -295,6 +344,7 @@
           if(item.record)await uploadMedia(item.record,step);
           const payload={v:1,id:item.recordId,collection:item.collection,deleted:false,record:item.record};
           const newSha=await writeBlob(path,enc.encode(JSON.stringify(payload)),known);
+          rememberVerifiedPlaceRefs(path,newSha,payload);
           await storage.ackPending(item,path,newSha);
         }
         step();
@@ -347,6 +397,7 @@
     if(!String(token||"").trim())throw new Error("A GitHub fine-grained repository token is required for uploads.");
     emitProgress(2,"Deriving encryption key");
     const key=await deriveKey(passphrase,owner,ENCRYPTION_CONTEXT_REPO);
+    verifiedPlaceRefs.clear();
     connection={owner,repo,branch,token:String(token).trim(),key};
     emitProgress(10,"Checking private repository access");
     try {
@@ -360,7 +411,7 @@
         emitProgress(percent,total?`Loaded ${completed} of ${total} POIs (including attachments)`:"No remote POIs to download");
       });
       emitProgress(77,"Reconciling local and remote changes");
-    } catch(e){connection=null;remoteFiles.clear();throw e;}
+    } catch(e){connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();throw e;}
     active=true;
     lastMediaSnapshot="";
     setStatus("Connected. Downloading encrypted research...");
@@ -369,7 +420,7 @@
     await sync(emitProgress);
     return true;
   }
-  function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
+  function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
   function onVisibility(){if(document.visibilityState==="visible")void sync();}
   window.addEventListener("pt-local-change",queueSoon);
   document.addEventListener("visibilitychange",onVisibility);
