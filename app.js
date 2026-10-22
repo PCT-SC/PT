@@ -640,7 +640,9 @@
     }
   }
 
+  let reconnectDotsTimer = null;
   function setBootState(mode, message = "") {
+    if (reconnectDotsTimer !== null) { clearInterval(reconnectDotsTimer); reconnectDotsTimer = null; }
     state.bootState = mode;
     const app = $("app");
     const bootScreen = $("boot-screen");
@@ -660,8 +662,19 @@
     if (bootScreen) bootScreen.dataset.state = mode;
     if (bootStatus && showBoot) {
       const statusMessage = message || (mode === "failed" ? "Unable to load the app." : mode === "setup" ? "" : "Loading app data...");
-      bootStatus.textContent = statusMessage;
+      const reconnecting = mode === "loading" && /^Reconnecting to GitHub\.{0,3}$/.test(statusMessage);
+      bootStatus.textContent = reconnecting ? "Reconnecting to GitHub" : statusMessage;
       bootStatus.classList.toggle("hidden", !statusMessage);
+      if (reconnecting) {
+        const dotsElement = document.createElement("span");
+        dotsElement.setAttribute("aria-hidden", "true");
+        bootStatus.append(dotsElement);
+        let dots = 0;
+        reconnectDotsTimer = setInterval(() => {
+          dots = (dots + 1) % 4;
+          dotsElement.textContent = ".".repeat(dots);
+        }, 500);
+      }
     }
     bootRetry?.classList.toggle("hidden", mode !== "failed");
 

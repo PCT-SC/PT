@@ -623,6 +623,22 @@
   let attachmentPreviewUrls = [];
   let addingAttachments = false;
   let editorResearchSession = 0;
+  let untitlingShiftHeld = false;
+
+  function updateUntitleAttachmentButton() {
+    const button = $("poi-untitle-attachments");
+    button.hidden = !untitlingShiftHeld || !editorAttachments.length || addingAttachments ||
+      $("editor").classList.contains("hidden") || $("place-form").classList.contains("hidden");
+  }
+
+  function handleUntitleShift(event) {
+    if (event.key !== "Shift") return;
+    untitlingShiftHeld = event.type === "keydown";
+    updateUntitleAttachmentButton();
+  }
+  window.addEventListener("keydown", handleUntitleShift);
+  window.addEventListener("keyup", handleUntitleShift);
+  window.addEventListener("blur", () => { untitlingShiftHeld = false; updateUntitleAttachmentButton(); });
 
   function editorSources() {
     return Array.from($("poi-source-list").querySelectorAll("input"))
@@ -691,6 +707,7 @@
   }
 
   async function renderAttachments() {
+    updateUntitleAttachmentButton();
     clearAttachmentPreviews();
     const container = $("poi-attachment-list");
     if (!editorAttachments.length) {
@@ -766,10 +783,45 @@
     } finally { bitmap.close(); }
   }
 
+  // The browser exposes a selected file's last-modified time, not its original creation time.
+  // Older attachments have only their local IndexedDB insertion time available.
+  async function untitleEditorAttachments() {
+    if (!untitlingShiftHeld || addingAttachments || !editorAttachments.length ||
+        $("editor").classList.contains("hidden") || $("place-form").classList.contains("hidden")) return;
+    const session = editorResearchSession;
+    const recordId = $("record-id").value;
+    const originals = editorAttachments.slice();
+    const dated = await Promise.all(originals.map(async (item, index) => {
+      let stored = null;
+      try { stored = await window.FALocalStore.readAttachment(item.id); } catch {}
+      const selectedDate = Date.parse(item.fileDate || "");
+      const localDate = Date.parse(stored?.created || "");
+      const time = Number.isFinite(selectedDate) ? selectedDate :
+        (Number.isFinite(localDate) ? localDate : Number.MAX_SAFE_INTEGER);
+      const type = String(item.type || stored?.type || "").toLowerCase();
+      const kind = type.startsWith("image/") ? 0 : type.startsWith("video/") ? 1 : 2;
+      const fromName = /\.([a-z0-9]{1,12})$/i.exec(String(item.name || ""))?.[1]?.toLowerCase();
+      const extension = fromName || ({"image/jpeg":"jpg", "image/png":"png", "image/webp":"webp",
+        "video/mp4":"mp4", "video/webm":"webm", "video/quicktime":"mov"}[type]) || "bin";
+      return {item, index, time, kind, extension};
+    }));
+    if (session !== editorResearchSession || recordId !== $("record-id").value ||
+        originals.length !== editorAttachments.length ||
+        originals.some((item, i) => item.id !== editorAttachments[i].id)) return;
+    dated.sort((a, b) => a.kind - b.kind || a.time - b.time || a.index - b.index);
+    editorAttachments = dated.map((row, index) => ({...row.item,
+      name: `Untitled_${index + 1}.${row.extension}`,
+      ...(Number.isFinite(row.time) && row.time !== Number.MAX_SAFE_INTEGER ?
+        {fileDate: new Date(row.time).toISOString()} : {})}));
+    await renderAttachments();
+    showToast("Attachment filenames updated. Save this place to sync the new names.", "success");
+  }
+
   async function addSelectedAttachments(files) {
     if (addingAttachments) return;
     addingAttachments = true;
     $("poi-add-attachment").disabled = true;
+    updateUntitleAttachmentButton();
     const initialId = $("record-id").value;
     const initialSession = editorResearchSession;
     const stillEditing = () => editorResearchSession === initialSession &&
@@ -792,7 +844,7 @@
             await window.FALocalStore.deleteUnreferencedAttachments([entry.id]);
             break;
           }
-          editorAttachments.push(entry);
+          editorAttachments.push({...entry, fileDate: new Date(Number(file.lastModified) > 0 ? Number(file.lastModified) : Date.now()).toISOString()});
           newlyAddedAttachmentIds.add(entry.id);
           await renderAttachments();
         } catch (error) {
@@ -802,6 +854,7 @@
     } finally {
       addingAttachments = false;
       $("poi-add-attachment").disabled = false;
+      updateUntitleAttachmentButton();
       $("poi-attachment-input").value = "";
     }
   }
@@ -824,6 +877,7 @@
   }
 
   $("poi-add-source").addEventListener("click", () => addSourceRow().focus());
+  $("poi-untitle-attachments").addEventListener("click", () => void untitleEditorAttachments().catch(error => showToast(`Unable to rename attachments: ${error.message}`)));
   $("poi-add-attachment").addEventListener("click", () => $("poi-attachment-input").click());
   $("poi-attachment-input").addEventListener("change", event => void addSelectedAttachments(Array.from(event.target.files || [])));
 
@@ -1025,7 +1079,7 @@
       tags: $("tags").value,
       notes: $("notes").value,
       sources: editorSources(),
-      attachments: editorAttachments.map(({id, name, type, size}) => ({id, name, type, size})),
+      attachments: editorAttachments.map(({id, name, type, size, fileDate}) => ({id, name, type, size, ...(fileDate ? {fileDate} : {})})),
       custom_fields: $("custom-fields").value,
       area_name: $("area-name").value,
       area_custom: state.editorAreaCustom,
@@ -4474,7 +4528,7 @@
       tags: $("tags").value.split(",").map(s => s.trim()).filter(Boolean),
       notes: $("notes").value,
       sources: editorSources(),
-      attachments: editorAttachments.map(({id, name, type, size}) => ({id, name, type, size})),
+      attachments: editorAttachments.map(({id, name, type, size, fileDate}) => ({id, name, type, size, ...(fileDate ? {fileDate} : {})})),
       custom_fields: customFields,
       geometry: geo.geometry,
       shape_type: geo.shape_type,
@@ -4564,7 +4618,7 @@
       tags: $("tags").value.split(",").map(s => s.trim()).filter(Boolean),
       notes: $("notes").value,
       sources: editorSources(),
-      attachments: editorAttachments.map(({id, name, type, size}) => ({id, name, type, size})),
+      attachments: editorAttachments.map(({id, name, type, size, fileDate}) => ({id, name, type, size, ...(fileDate ? {fileDate} : {})})),
       custom_fields: customFields,
       geometry: geo.geometry,
       shape_type: geo.shape_type,
