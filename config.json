@@ -1,8 +1,8 @@
 {
   "mapStart": {
-    "lat": 20,
-    "lon": 0,
-    "zoom": 3
+    "lat": 15.470492,
+    "lon": 44.839600,
+    "zoom": 7
   },
   "satellite": {
     "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",

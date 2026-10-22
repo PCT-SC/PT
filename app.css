@@ -580,7 +580,7 @@ body.view-orientation-dragging #map * { cursor: grabbing !important; }
   text-transform: uppercase;
 }
 .settings-tab-panel .settings-group-label:not(:first-child) { margin-top: 5px; }
-.editor form { display: grid; gap: 10px; }
+.editor form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .editor-head-actions { display: flex; align-items: center; gap: 6px; }
 .place-history { display: grid; gap: 10px; }
 .place-history-back { width: auto; justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
@@ -869,7 +869,7 @@ body.view-orientation-dragging #map * { cursor: grabbing !important; }
   border-radius: 3px;
 }
 .external-links a:hover { border-color: var(--accent); }
-.form-actions { display: flex; gap: 7px; padding-top: 8px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 8px; }
 .place-created-meta {
   margin-left: auto;
   margin-right: 2px;

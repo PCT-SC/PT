@@ -434,7 +434,7 @@
     if (action === "cheatSheet") { toggleShortcutCheatSheet(); return; }
     if (!state.map) return;
     if (action === "home") {
-      const home = state.config.mapStart || {lat: 20, lon: 0, zoom: 3};
+      const home = state.config.mapStart || {lat: 15.470492, lon: 44.839600, zoom: 7};
       resetViewOrientationInstant();
       navigateMap([Number(home.lat), Number(home.lon)], {zoom: Number(home.zoom)});
     } else if (action === "sidebar") {
@@ -738,8 +738,8 @@
 
   function initMap() {
     updateMapViewportForSidebar();
-    const savedView = loadSavedMapView();
-    const start = savedView || state.config.mapStart || {lat: 20, lon: 0, zoom: 3};
+    // Start at the configured home location, not the previous map view.
+    const start = state.config.mapStart || {lat: 15.470492, lon: 44.839600, zoom: 7};
     const worldBounds = window.FACore.createCoreMap({state, start, normalizeViewBearing, installSingleTransientTooltipPolicy});
     installMiddleViewGesture();
     installShiftPan();
@@ -874,7 +874,7 @@
       crosshair.classList.add("startup-faded");
       updateCenterCrosshairVisibility();
     }
-    if (savedView?.anchor === "crosshair" && state.followScreenCenter) {
+    if (state.followScreenCenter) {
       state.map.setView(mapNavigationCenter([start.lat, start.lon], start.zoom), start.zoom, {animate: false});
     }
     state.map.on("movestart zoomstart", wakeCenterCrosshair);
@@ -3137,7 +3137,7 @@ $("github-forget-login-btn")?.addEventListener("click",async()=>{
 
   async function start() {
     wireUi();
-    state.config = {"mapStart":{"lat":20,"lon":0,"zoom":3},"satellite":{"url":"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}","maxZoom":19,"attribution":"Esri World Imagery"},"reverseGeocoder":{"url":"https://nominatim.openstreetmap.org/reverse","attribution":"OpenStreetMap / Nominatim"}};
+    state.config = {"mapStart":{"lat":15.470492,"lon":44.839600,"zoom":7},"satellite":{"url":"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}","maxZoom":19,"attribution":"Esri World Imagery"},"reverseGeocoder":{"url":"https://nominatim.openstreetmap.org/reverse","attribution":"OpenStreetMap / Nominatim"}};
     // Restore a device-remembered login and check for new encrypted research.
     setBootState("loading","Checking for a saved GitHub login...");
     let remembered;
