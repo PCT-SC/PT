@@ -103,22 +103,27 @@
     for(const f of response.tree||[])if(f.type==="blob" && /^research\/(?:places|media)\/[^/]+\.bin$/.test(f.path))files.set(f.path,f.sha);
     return {head,treeSha,files};
   }
-  async function remoteMediaReferences(files) {
+  async function remoteMediaReferences(files,progress=null) {
     const references=new Set();
-    for(const [path,sha] of files){
+    const places=[...files].filter(([path])=>/^research\/places\/([^/]+)\.bin$/.test(path));
+    let scanned=0;
+    if(progress)progress(0,places.length);
+    for(const [path,sha] of places){
       const match=/^research\/places\/([^/]+)\.bin$/.exec(path);
-      if(!match)continue;
       const payload=JSON.parse(dec.decode(await readBlob(path,sha)));
       if(payload?.v!==1 || payload?.collection!=="places" || payload?.id!==match[1])
         throw new Error("Cannot clean attachments: an encrypted POI record is invalid.");
-      if(payload.deleted)continue; // Legacy deletion markers have no attachments.
-      if(!payload.record || !Array.isArray(payload.record.attachments||[]))
-        throw new Error("Cannot clean attachments: an encrypted POI has an invalid attachment list.");
-      for(const item of payload.record.attachments||[]){
-        const id=String(item?.id||"");
-        if(!/^[a-zA-Z0-9_-]{8,100}$/.test(id))throw new Error("Cannot clean attachments: invalid media reference.");
-        references.add(filePath("media",id));
+      if(!payload.deleted){
+        if(!payload.record || !Array.isArray(payload.record.attachments||[]))
+          throw new Error("Cannot clean attachments: an encrypted POI has an invalid attachment list.");
+        for(const item of payload.record.attachments||[]){
+          const id=String(item?.id||"");
+          if(!/^[a-zA-Z0-9_-]{8,100}$/.test(id))throw new Error("Cannot clean attachments: invalid media reference.");
+          references.add(filePath("media",id));
+        }
       }
+      scanned++;
+      if(progress)progress(scanned,places.length);
     }
     return references;
   }
@@ -131,7 +136,8 @@
     remoteFiles.delete(path);
     return result.commit.sha;
   }
-  async function cleanUnusedMedia() {
+  async function cleanUnusedMedia(progress=null) {
+    if(progress)progress(0,"Checking for unused encrypted attachments");
     if((await storage.syncStatus()).pending.length)return 0;
     // No network requests on unchanged repository states.
     const signature=[...remoteFiles].filter(([path])=>/^research\/(places|media)\//.test(path)).sort(([a],[b])=>a.localeCompare(b)).map(([path,sha])=>`${path}:${sha}`).join("|");
@@ -139,19 +145,25 @@
     if(![...remoteFiles.keys()].some(path=>path.startsWith("research/media/"))){lastMediaSnapshot=signature;return 0;}
     let current=await treeSnapshot();
     if(![...current.files.keys()].some(path=>path.startsWith("research/media/"))){lastMediaSnapshot=signature;return 0;}
-    const refs=await remoteMediaReferences(current.files);
+    const refs=await remoteMediaReferences(current.files,(completed,total)=>{
+      if(progress)progress(total?0.6*completed/total:0.6,`Checked ${completed} of ${total} POIs for unused attachments`);
+    });
     const unused=[...current.files].filter(([path])=>path.startsWith("research/media/")&&!refs.has(path));
-    let removed=0;
+    let removed=0,checked=0;
     for(const [path,sha] of unused){
       // Before each deletion recheck both branch HEAD and all active references.
       const latest=await treeSnapshot();
       if(latest.head!==current.head)break;
       const latestRefs=await remoteMediaReferences(latest.files);
-      if(latest.files.get(path)!==sha||latestRefs.has(path))continue;
+      if(latest.files.get(path)!==sha||latestRefs.has(path)){
+        checked++;if(progress)progress(0.6+0.4*checked/unused.length,`Checked ${checked} of ${unused.length} unused attachments`);
+        continue;
+      }
       if((await storage.syncStatus()).pending.length)break;
       await deleteRemoteFile(path,sha,"Remove unused encrypted Project Tracker attachment");
       removed++;
       current=await treeSnapshot();
+      checked++;if(progress)progress(0.6+0.4*checked/unused.length,`Checked ${checked} of ${unused.length} unused attachments`);
     }
     if(removed){remoteFiles=await listTree();}
     // Retry if another device modified the branch or media still awaits removal.
@@ -167,16 +179,18 @@
     await storage.storeRemoteAttachment({id,name:info.name||"Attachment",type:info.type||"application/octet-stream",size:bytes.length,created:new Date().toISOString(),blob:new Blob([bytes],{type:info.type||"application/octet-stream"})});
     return true;
   }
-  async function uploadMedia(record) {
+  async function uploadMedia(record,progress=null) {
     const refs=Array.isArray(record?.attachments)?record.attachments:[];
     for(const item of refs){
       const id=String(item.id||"");if(!/^[a-zA-Z0-9_-]{8,100}$/.test(id))throw new Error("Invalid attachment reference.");
       const path=filePath("media",id);
-      if(remoteFiles.has(path))continue;
-      const media=await storage.readOne("attachments",id);
-      if(!media?.blob)throw new Error(`Missing local attachment ${id}. Nothing was uploaded for this POI.`);
-      if(media.blob.size>MAX_MEDIA_BYTES)throw new Error(`Attachment exceeds ${MAX_MEDIA_BYTES/1024/1024} MiB GitHub sync limit. Compress the video first.`);
-      await writeBlob(path,new Uint8Array(await media.blob.arrayBuffer()),null);
+      if(!remoteFiles.has(path)){
+        const media=await storage.readOne("attachments",id);
+        if(!media?.blob)throw new Error(`Missing local attachment ${id}. Nothing was uploaded for this POI.`);
+        if(media.blob.size>MAX_MEDIA_BYTES)throw new Error(`Attachment exceeds ${MAX_MEDIA_BYTES/1024/1024} MiB GitHub sync limit. Compress the video first.`);
+        await writeBlob(path,new Uint8Array(await media.blob.arrayBuffer()),null);
+      }
+      if(progress)progress();
     }
   }
   async function pull(progress=null) {
@@ -240,53 +254,67 @@
     if(changed)onChange();
     return conflicts;
   }
-  async function push() {
-    const queued=(await storage.syncStatus()).pending;
-    let conflicts=0;
+  async function push(progress=null) {
+    const queued=(await storage.syncStatus()).pending.filter(item=>item.collection==="places");
+    const mediaCount=item=>item.deleted?0:(Array.isArray(item.record?.attachments)?item.record.attachments.length:0);
+    const total=queued.reduce((sum,item)=>sum+1+mediaCount(item),0);
+    let completed=0,conflicts=0;
+    const step=()=>{completed++;if(progress)progress(completed,total,`Processed ${completed} of ${total} pending operations`);};
+    if(progress)progress(0,total,total?`Processing ${total} pending POI and attachment operations`:"No pending changes to upload");
     for(const item of queued){
-      if(item.collection!=="places")continue;
       const path=filePath(item.collection,item.recordId);
       const current=remoteFiles.get(path)||null;
       const known=(await storage.metadata(path))?.sha||null;
       // Permanent removal deletes the encrypted file, not an encrypted tombstone.
-      if(item.deleted && !current){await storage.ackRemoval(item,path);continue;}
-      if(current!==known){conflicts++;continue;}
+      if(item.deleted && !current){await storage.ackRemoval(item,path);step();continue;}
+      if(current!==known){conflicts++;for(let i=0;i<=mediaCount(item);i++)step();continue;}
       try{
         if(item.deleted){
           await deleteRemoteFile(path,current,"Permanently remove encrypted Project Tracker POI");
           await storage.ackRemoval(item,path);
         }else{
-          if(item.record)await uploadMedia(item.record);
+          if(item.record)await uploadMedia(item.record,step);
           const payload={v:1,id:item.recordId,collection:item.collection,deleted:false,record:item.record};
           const newSha=await writeBlob(path,enc.encode(JSON.stringify(payload)),known);
           await storage.ackPending(item,path,newSha);
         }
+        step();
       }catch(e){
-        if(e.status===409||e.status===422){conflicts++;continue;}
+        if(e.status===409||e.status===422){conflicts++;step();continue;}
         throw e;
       }
     }
     return conflicts;
   }
-  async function sync() {
+  async function sync(progress=null) {
     if(!connection||!active)return;
     if(syncing)return syncing;
     syncing=(async()=>{
       lastAttemptAt=new Date().toISOString();
       try{
         setStatus("Synchronizing encrypted research...");
-        let detected=await pull();
-        detected+=await push();
+        if(progress)progress(80,"Checking GitHub for recent POI changes");
+        let detected=await pull((completed,total)=>{
+          if(progress)progress(total?80+Math.floor(2*completed/total):82,total?`Checked ${completed} of ${total} remote POIs`:"No remote POIs to reconcile");
+        });
+        if(progress)progress(83,"Checking locally pending changes and attachments");
+        detected+=await push((completed,total,detail)=>{
+          if(progress)progress(total?83+Math.floor(6*completed/total):89,detail);
+        });
         pendingCount=(await storage.syncStatus()).pending.length;
         conflicts=detected;
         lastCheckAt=new Date().toISOString();
         if(detected)setStatus(`${pendingCount} changes need conflict resolution. They remain safely in this browser.`,"Concurrent or preexisting records detected");
         else if(pendingCount)setStatus(`${pendingCount} changes saved locally. Upload pending.`);
         else {
-          const removed=await cleanUnusedMedia();
+          if(progress)progress(89,"Checking encrypted attachment references");
+          const removed=await cleanUnusedMedia((fraction,detail)=>{
+            if(progress)progress(89+Math.floor(3*fraction),detail);
+          });
           lastSuccessAt=lastCheckAt;
           setStatus(removed ? `Up to date - removed ${removed} unused attachment(s)` : "Up to date - encrypted GitHub sync active");
         }
+        if(progress)progress(92,"Finishing encrypted synchronization");
       }catch(e){setStatus("Offline or sync failed - local changes retained",e?.message||"Unknown error");}
     })().finally(()=>{syncing=null;onStatus(snapshot());if(needsResync){needsResync=false;queueSoon();}});
     return syncing;
@@ -319,8 +347,7 @@
     setStatus("Connected. Downloading encrypted research...");
     clearInterval(pollTimer);pollTimer=setInterval(()=>void sync(),POLL_MS);
     emitProgress(80,"Synchronizing pending changes and attachments");
-    await sync();
-    emitProgress(92,"Finishing encrypted synchronization");
+    await sync(emitProgress);
     return true;
   }
   function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
