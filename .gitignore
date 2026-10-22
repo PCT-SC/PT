@@ -1,0 +1,4 @@
+# Plaintext research must not be committed. Future sync uses encrypted data files.
+research/
+*.log
+pb_data/

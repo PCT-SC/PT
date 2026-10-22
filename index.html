@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Tracker - Encrypted Research Map</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="vendor/geoman/leaflet-geoman.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
+  <link rel="stylesheet" href="app.css?v=20261022-privacy-1">
+</head>
+<body>
+  <div id="boot-screen" class="boot-screen hidden" data-state="loading" lang="en" dir="ltr" data-no-translate>
+    <div class="boot-box" role="status" aria-live="polite">
+      <h1>Project Tracker</h1>
+      <div id="boot-status" class="hidden" aria-live="polite"></div>
+      <div class="boot-actions">
+        <form id="github-connect-form" class="github-connect-form" autocomplete="off">
+          <p class="github-target-summary">Private repository: <strong>PCT-SC/pt-d</strong> (main)</p>
+          <label for="github-token">GitHub access token</label>
+          <input id="github-token" type="password" autocomplete="off" spellcheck="false" required placeholder="Enter your fine-grained token">
+          <label for="github-passphrase">Encryption passphrase</label>
+          <input id="github-passphrase" type="password" autocomplete="off" spellcheck="false" required minlength="16" placeholder="Enter your shared passphrase">
+          <button id="github-connect-btn" class="backup-export-btn" type="submit">Connect to GitHub</button>
+        </form>
+        <button id="boot-retry" class="secondary hidden" type="button">Retry</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <div>
+          <strong id="sidebar-title">Saved places</strong>
+          <span id="place-count" class="muted"></span>
+        </div>
+      </div>
+
+      <input id="search" class="wide" placeholder="Search places">
+      <div id="saved-filters" class="filter-row">
+        <select id="category-filter">
+          <option value="">All categories</option>
+        </select>
+        <select id="sort">
+          <option value="updated">Recently updated</option>
+          <option value="created">Newest</option>
+          <option value="name">Name</option>
+          <option value="favorite">Favorites first</option>
+        </select>
+      </div>
+      <div class="sidebar-mode-row">
+        <div id="favorites-wrap" class="sidebar-quick-toggles"><input id="favorites-only" class="visually-hidden-control" type="checkbox" tabindex="-1" aria-hidden="true"><button id="favorites-toggle" class="sidebar-icon-toggle" type="button" aria-label="Show favorites only" title="Show favorites only"><i class="fa-regular fa-star" aria-hidden="true"></i></button><button id="sidebar-hide-pois-toggle" class="sidebar-icon-toggle" type="button" aria-label="Hide all POIs" title="Hide all POIs"><i class="fa-solid fa-eye" aria-hidden="true"></i></button></div>
+        <button id="trash-btn" class="trash-link" type="button">Trash (0)</button>
+      </div>
+
+      <div id="place-list" class="place-list"></div>
+    </aside>
+
+    <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Hide sidebar" aria-expanded="true" title="Hide sidebar"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+      <div class="map-actions">
+        <button id="add-btn">Add Place</button>
+        <button id="sync-toolbar-btn" class="sync-toolbar-btn" type="button" data-state="offline" aria-label="Open synchronization status" title="GitHub sync status" data-no-translate>
+          <span id="sync-toolbar-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M8.5 12.5L10.5 14.5L15.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span id="sync-toolbar-pending" class="sync-toolbar-dot" hidden></span>
+        </button>
+        <div id="sync-popover" class="sync-popover hidden" role="dialog" aria-label="GitHub synchronization" aria-modal="false" tabindex="-1" data-no-translate>
+          <div class="sync-simple-top">
+            <h3 class="sync-heading">Sync status</h3><button id="sync-popover-close" class="secondary small" type="button" title="Close" aria-label="Close Sync panel">Close</button>
+          </div>
+          <span class="sync-repo-identity">PCT-SC/pt-d</span>
+          <div class="sync-simple-status" role="status" aria-live="polite">
+            <strong id="sync-view-connection">Connecting</strong>
+            <span id="sync-view-status">Checking GitHub...</span>
+          </div>
+          <div class="sync-simple-details">
+            <div><span>Pending</span><strong id="sync-view-pending">0</strong></div>
+            <div><span>Conflicts</span><strong id="sync-view-conflicts">0</strong></div>
+            <div><span>Last synced</span><strong id="sync-view-last-success">Not yet</strong></div>
+          </div>
+          <p class="sync-note">POIs and attachments sync automatically. Checking every 30 seconds. Markups stay local.</p>
+          <div id="sync-view-error" class="sync-current-error" role="alert" hidden></div>
+          <div class="backup-actions sync-simple-actions">
+            <button id="github-sync-now-btn" class="backup-export-btn" type="button">Sync now</button>
+            <button id="github-publish-local-btn" class="backup-export-btn" type="button">Publish existing POIs</button>
+          </div>
+<details class="sync-advanced"><summary>Connection options</summary>
+            <p class="sync-note">Saved login is stored in this browser.</p>
+            <button id="github-forget-login-btn" class="backup-export-btn" type="button">Forget saved login and disconnect</button>
+          </details>
+        </div>
+
+        <div id="add-menu" class="popover hidden">
+          <button data-draw="Marker">Point</button>
+          <button data-draw="Circle">Circle</button>
+          <button data-draw="Polygon">Polygon</button>
+        </div>
+        <button id="view-compass" class="view-compass" type="button" aria-label="Reset view to north" title="Reset view to north"><svg id="view-compass-needle" class="view-compass-needle" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.1"/><path d="M12 12V5.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg></button>
+        <input id="view-bearing-readout" class="view-bearing-readout" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Map bearing in degrees" aria-hidden="true" value="0">
+      </div>
+
+      <button id="basemap-toggle" class="hamburger basemap-toggle" aria-label="Toggle base map">SAT</button>
+      <div id="satellite-brightness-info" class="satellite-brightness-info hidden">
+        <button id="satellite-brightness-info-button" class="satellite-brightness-info-button" type="button" aria-label="Satellite brightness" aria-expanded="false"><span class="worldcover-legend-glyph" aria-hidden="true"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></span></button>
+        <div class="satellite-brightness-popup" role="dialog" aria-label="Esri satellite brightness">
+          <div class="satellite-brightness-header"><span class="worldcover-legend-title">Esri brightness</span><button id="satellite-brightness-quick-reset" class="secondary small satellite-brightness-reset" type="button">Reset</button></div>
+          <label class="satellite-brightness-control"><input id="satellite-brightness-quick" type="range" min="25" max="150" step="5" value="100" aria-label="Esri satellite brightness"><span id="satellite-brightness-quick-value">100%</span></label>
+          <div class="satellite-border-control">
+            <label class="check-line satellite-border-master"><input id="border-toggle" type="checkbox" aria-label="Show satellite borders"> Borders</label>
+            <details id="border-settings" class="satellite-border-settings hidden">
+              <summary>Border settings</summary>
+              <div id="border-style-controls" class="satellite-border-style-controls">
+                <div class="satellite-border-group" title="International borders over land">
+                  <div class="satellite-border-style-row">
+                    <label class="check-line"><input id="border-shared-toggle" type="checkbox"> Land</label>
+                    <input id="border-shared-color" class="satellite-border-color" type="color" value="#ffffff" aria-label="Land border color">
+                    <select id="border-shared-style" aria-label="Land border style"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
+                  </div>
+                  <label class="satellite-border-opacity-row"><span>Opacity</span><input id="border-shared-opacity" type="range" min="0" max="100" step="5" value="78" aria-label="Land border opacity"><span id="border-shared-opacity-value">78%</span></label>
+                </div>
+                <div class="satellite-border-group" title="Single-country exterior administrative limits over water">
+                  <div class="satellite-border-style-row">
+                    <label class="check-line"><input id="border-outer-toggle" type="checkbox"> Sea</label>
+                    <input id="border-outer-color" class="satellite-border-color" type="color" value="#7fd8ff" aria-label="Sea border color">
+                    <select id="border-outer-style" aria-label="Sea border style"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
+                  </div>
+                  <label class="satellite-border-opacity-row"><span>Opacity</span><input id="border-outer-opacity" type="range" min="0" max="100" step="5" value="78" aria-label="Sea border opacity"><span id="border-outer-opacity-value">78%</span></label>
+                </div>
+                <div class="satellite-border-group" title="Shared international boundaries extending from land across water">
+                  <div class="satellite-border-style-row">
+                    <label class="check-line"><input id="border-shared-sea-toggle" type="checkbox"> Sea extensions</label>
+                    <input id="border-shared-sea-color" class="satellite-border-color" type="color" value="#7fd8ff" aria-label="Sea extension border color">
+                    <select id="border-shared-sea-style" aria-label="Sea extension border style"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
+                  </div>
+                  <label class="satellite-border-opacity-row"><span>Opacity</span><input id="border-shared-sea-opacity" type="range" min="0" max="100" step="5" value="78" aria-label="Sea extension border opacity"><span id="border-shared-sea-opacity-value">78%</span></label>
+                </div>
+              </div>
+            </details>
+          </div>
+          <label class="check-line satellite-overzoom-control"><input id="satellite-raster-overzoom" type="checkbox"> Raster overzoom beyond native</label>
+        </div>
+      </div>
+      <div id="osm-brightness-info" class="satellite-brightness-info hidden">
+        <button id="osm-brightness-info-button" class="satellite-brightness-info-button" type="button" aria-label="Street basemap display options" aria-expanded="false"><span class="worldcover-legend-glyph" aria-hidden="true"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></span></button>
+        <div class="satellite-brightness-popup" role="dialog" aria-label="Street basemap display options">
+          <div class="satellite-brightness-header"><span class="worldcover-legend-title">Street brightness</span><button id="osm-brightness-quick-reset" class="secondary small satellite-brightness-reset" type="button">Reset</button></div>
+          <label class="satellite-brightness-control"><input id="osm-brightness-quick" type="range" min="25" max="150" step="5" value="100" aria-label="Street brightness"><span id="osm-brightness-quick-value">100%</span></label>
+          <label class="check-line satellite-overzoom-control"><input id="osm-raster-overzoom" type="checkbox"> Raster overzoom beyond native</label>
+        </div>
+      </div>
+      <button id="config-btn" class="hamburger" aria-label="Map configuration">Menu</button>
+
+      <section id="config-panel" class="config-panel hidden" data-fa-exclusive="config">
+        <div class="panel-title">
+          <strong>Map configuration</strong>
+          <button id="config-close" class="secondary small">Close</button>
+        </div>
+
+        <div id="settings-tabs" class="settings-tabs" role="tablist" aria-label="Map configuration sections">
+          <button id="settings-tab-general" class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-general" tabindex="0" data-settings-tab="general">General</button>
+          <button id="settings-tab-links" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-links" tabindex="-1" data-settings-tab="links">Links</button>
+          <button id="settings-tab-display" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-display" tabindex="-1" data-settings-tab="display">Display</button>
+          <button id="settings-tab-measurements" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-measurements" tabindex="-1" data-settings-tab="measurements">Measurements</button>
+          <button id="settings-tab-shortcuts" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-shortcuts" tabindex="-1" data-settings-tab="shortcuts">Shortcuts</button>
+
+          <button id="settings-tab-backup" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-backup" tabindex="-1" data-settings-tab="backup">Backup</button>
+        </div>
+
+        <div id="settings-panel-general" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
+          <label>Default color
+            <select id="poi-color">
+              <option value="#4aa3ff">Blue</option>
+              <option value="#ff5c5c">Red</option>
+              <option value="#42c77a">Green</option>
+              <option value="#e7c84b">Yellow</option>
+              <option value="#f28c45">Orange</option>
+              <option value="#a978ff">Purple</option>
+              <option value="#f472b6">Pink</option>
+              <option value="#3bc7c7">Cyan</option>
+                <option value="#9ca3af" data-exclude-markup-cycle="true">Gray</option>
+            </select>
+          </label>
+          <label class="check-line"><input id="vary-markup-colors" type="checkbox"> Vary markup colors</label>
+          <label class="check-line"><input id="pin-favorites-sidebar" type="checkbox"> Pin favorites in sidebar</label>
+          <span class="settings-group-label">Rendering</span>
+          <div class="check-line"><label class="check-line"><input id="optimized-rendering" type="checkbox" checked> Use optimized map rendering</label><span id="optimized-rendering-info" class="area-info" tabindex="0" aria-label="Optimized map rendering information"><span class="area-info-glyph" aria-hidden="true"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></span><span class="area-info-text">Uses accelerated map geometry and batched Overpass/OAP boundaries. Changing reloads the map.</span></span></div>
+          <span class="settings-group-label">Animations</span>
+          <label class="check-line"><input id="north-reset-animation" type="checkbox"> Animate return to north</label>
+          <label class="check-line"><input id="smooth-scale-resize" type="checkbox" checked> Animate linear scale resizing</label>
+        </div>
+
+        <div id="settings-panel-links" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-links" data-settings-panel="links" hidden>
+          <div id="provider-settings"></div>
+        </div>
+
+        <div id="settings-panel-display" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-display" data-settings-panel="display" hidden>
+          <label class="check-line"><input id="scale-toggle" type="checkbox"> Linear scale</label>
+          <label class="check-line"><input id="view-bearing-readout-toggle" type="checkbox"> Compass bearing readout</label>
+          <label class="check-line"><input id="center-coords-toggle" type="checkbox"> Coordinates follow crosshair</label>
+          <label id="invert-crosshair-setting" class="check-line"><input id="invert-crosshair-toggle" type="checkbox"> Invert crosshair color</label>
+          <label class="check-line"><input id="show-active-layer-buttons" type="checkbox"> Show active layer buttons beside layer selector</label>
+          <label class="check-line"><input id="category-map-filter" type="checkbox"> Filter map POIs by sidebar category</label>
+          <label class="check-line"><input id="black-unavailable-satellite-tiles" type="checkbox"> Black unavailable satellite tiles</label>
+          <div class="range-setting"><div class="range-setting-head"><label for="fill-opacity">Boundary fill opacity</label><button id="fill-opacity-reset" class="secondary small satellite-brightness-reset" type="button">Reset</button></div>
+            <span class="range-control"><input id="fill-opacity" type="range" min="0" max="1" step="0.05"><span id="fill-opacity-value" class="muted"></span></span>
+          </div>
+        </div>
+
+        <div id="settings-panel-measurements" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-measurements" data-settings-panel="measurements" hidden>
+          <span class="settings-group-label">Coordinates</span>
+          <label>Coordinates format
+            <select id="coordinate-format">
+              <option value="dd">Decimal degrees</option>
+              <option value="ddm">Degrees, decimal minutes (DDM)</option>
+              <option value="dms">Degrees, minutes, seconds (DMS)</option>
+            </select>
+          </label>
+
+
+          <span class="settings-group-label">Units</span>
+          <label>Measurement system
+            <select id="measurement-system">
+              <option value="metric">Metric (m, km)</option>
+              <option value="imperial">Imperial (ft, mi)</option>
+              <option value="nautical">Nautical (m, nmi)</option>
+            </select>
+          </label>
+          <label id="metric-area-units-wrap">Area units
+            <select id="area-units">
+              <option value="m2">m&sup2;</option>
+              <option value="km2">km&sup2;</option>
+              <option value="ha">hectares</option>
+            </select>
+          </label>
+          <label id="area-threshold-wrap">m&sup2; before switching to km&sup2;
+            <input id="area-threshold" type="number" min="0" step="1" placeholder="Blank = never switch">
+          </label>
+
+          <details id="geometry-label-settings" class="geometry-label-settings">
+            <summary class="geometry-label-summary">Geometry labels</summary>
+            <div class="geometry-label-content">
+              <div id="geometry-label-tabs" class="settings-tabs geometry-label-tabs" role="tablist" aria-label="Geometry label type">
+                <button type="button" class="settings-tab active" role="tab" aria-selected="true" aria-controls="geometry-label-measurements" data-geometry-tab="measurements">Measurements</button>
+                <button type="button" class="settings-tab" role="tab" aria-selected="false" aria-controls="geometry-label-pois" data-geometry-tab="pois">POIs</button>
+              </div>
+              <div id="geometry-label-measurements" class="geometry-label-panel" role="tabpanel">
+                <section class="geometry-label-subsection"><span class="geometry-label-subheading">Marker</span>
+                  <label class="check-line"><input id="measure-marker-coordinates" type="checkbox"> Show marker coordinates</label>
+                </section>
+                <section class="geometry-label-subsection"><span class="geometry-label-subheading">Line</span>
+                  <label class="check-line"><input id="measure-line-distance" type="checkbox"> Show line distance</label>
+                  <label class="check-line"><input id="measure-line-bearing" type="checkbox"> Show line bearing</label>
+                </section>
+                <section class="geometry-label-subsection"><span class="geometry-label-subheading">Polygon</span>
+                  <label class="check-line"><input id="measure-polygon-area" type="checkbox"> Show polygon area</label>
+                  <label class="check-line"><input id="measure-polygon-perimeter" type="checkbox"> Show polygon perimeter</label>
+                </section>
+                <section class="geometry-label-subsection"><span class="geometry-label-subheading">Circle</span>
+                  <label class="check-line"><input id="measure-circle-diameter" type="checkbox"> Show circle diameter</label>
+                  <label class="check-line"><input id="measure-circle-radius" type="checkbox"> Show circle radius</label>
+                  <label class="check-line"><input id="measure-circle-area" type="checkbox"> Show circle area</label>
+                  <label class="check-line"><input id="measure-circle-circumference" type="checkbox"> Show circle circumference</label>
+                </section>
+              </div>
+              <div id="geometry-label-pois" class="geometry-label-panel" role="tabpanel" hidden>
+                <section class="geometry-label-subsection"><span class="geometry-label-subheading">Point</span>
+                  <label class="check-line"><input id="poi-marker-coordinates" type="checkbox"> Show point coordinates</label>
+                </section>
+                <section class="geometry-label-subsection"><span class="geometry-label-subheading">Polygon</span>
+                  <label class="check-line"><input id="show-polygon-area" type="checkbox"> Show polygon area</label>
+                  <label class="check-line"><input id="show-polygon-perimeter" type="checkbox"> Show polygon perimeter</label>
+                </section>
+                <section class="geometry-label-subsection"><span class="geometry-label-subheading">Circle</span>
+                  <label class="check-line"><input id="poi-circle-diameter" type="checkbox"> Show circle diameter</label>
+                  <label class="check-line"><input id="poi-circle-radius" type="checkbox"> Show circle radius</label>
+                  <label class="check-line"><input id="show-circle-area" type="checkbox"> Show circle area</label>
+                  <label class="check-line"><input id="show-circle-circumference" type="checkbox"> Show circle circumference</label>
+                </section>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div id="settings-panel-shortcuts" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-settings-panel="shortcuts" hidden>
+          <div id="shortcut-settings-list" class="shortcut-settings-list"></div>
+          <div class="shortcut-settings-divider" aria-hidden="true"></div>
+          <div class="check-line"><label class="check-line"><input id="hide-all-requires-shift" type="checkbox"> Require Shift for full label and layer hide</label><span class="area-info shortcut-hide-info" tabindex="0" aria-label="Full label and layer hide information"><span class="area-info-glyph" aria-hidden="true"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></span><span class="area-info-text">When off, the hide shortcut alone hides all map overlays except the base layer.</span></span></div>
+          <div class="shortcut-settings-actions"><button id="shortcut-reset-defaults" class="secondary small" type="button">Reset defaults</button><button id="shortcut-show-cheat-sheet" class="secondary small" type="button">Show cheat sheet</button></div>
+        </div>
+
+
+        <div id="settings-panel-backup" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-backup" data-settings-panel="backup" hidden>
+          <div class="shortcut-settings-note">Local JSON backup includes all places (including Trash), attachments, measurements, elevation profiles, sketches, settings, map view and layer preferences. Attachment files are included as Base64.</div>
+          <div class="backup-actions">
+            <button id="export-json-btn" class="backup-export-btn" type="button">Export Backup (.json)</button>
+            <button id="export-report-word-btn" class="backup-export-btn" type="button">Export Document (.docx)</button>
+            <button id="export-report-pdf-btn" class="backup-export-btn" type="button">Export Document (.pdf)</button>
+          </div>
+          <form id="report-export-panel" class="report-export-panel" hidden>
+            <h3>Research report</h3>
+            <div class="report-export-grid">
+              <label>Report date <input id="report-export-date" type="date" required></label>
+              <label>Sender name (optional) <input id="report-export-name" autocomplete="off" placeholder="الاسم"></label>
+            </div>
+            <label>Contact method (optional) <input id="report-export-contact" autocomplete="off" placeholder="وسيلة التواصل"></label>
+            <label>Subject <input id="report-export-subject" dir="rtl"></label>
+            <label>Introduction <textarea id="report-export-intro" dir="rtl" rows="9"></textarea></label>
+            <div class="report-export-actions">
+              <button class="backup-export-btn" id="report-export-confirm" type="submit">Create report</button>
+              <button class="backup-export-btn" id="report-export-cancel" type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <div id="polygon-drag-wrap" class="polygon-drag-wrap hidden">
+        <button id="polygon-drag-btn" class="polygon-drag-btn" type="button" aria-label="Shape drag mode" title="Shape drag mode"><i class="fa-solid fa-location-dot" aria-hidden="true"></i></button>
+        <div id="polygon-drag-menu" class="polygon-drag-menu hidden">
+          <button id="polygon-drag-icon-mode" type="button" data-polygon-drag-mode="icon"><i class="fa-solid fa-check" aria-hidden="true"></i><span>Icon</span></button>
+          <button id="polygon-drag-polygon-mode" type="button" data-polygon-drag-mode="polygon"><i class="fa-solid fa-check" aria-hidden="true"></i><span id="polygon-drag-shape-label">Polygon</span></button>
+          <div class="polygon-drag-divider"></div>
+          <button id="polygon-drag-reset" type="button">Reset icon position</button>
+        </div>
+      </div>
+
+      <div id="shape-convert-wrap" class="shape-convert-wrap hidden">
+        <button id="shape-convert-btn" class="shape-convert-btn" type="button" aria-label="Change shape" title="Change shape"><svg class="shape-convert-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 256 256" aria-hidden="true"><path d="M213.66,181.66l-32,32a8,8,0,0,1-11.32-11.32L188.69,184H48a8,8,0,0,1,0-16H188.69l-18.35-18.34a8,8,0,0,1,11.32-11.32l32,32A8,8,0,0,1,213.66,181.66Zm-139.32-64a8,8,0,0,0,11.32-11.32L67.31,88H208a8,8,0,0,0,0-16H67.31L85.66,53.66A8,8,0,0,0,74.34,42.34l-32,32a8,8,0,0,0,0,11.32Z"></path></svg></button>
+        <div id="shape-convert-menu" class="shape-convert-menu hidden">
+          <button id="shape-convert-point" type="button" data-shape-convert="point"><i class="fa-solid fa-check" aria-hidden="true"></i><span>Point</span></button>
+          <button id="shape-convert-circle" type="button" data-shape-convert="circle"><i class="fa-solid fa-check" aria-hidden="true"></i><span>Circle</span></button>
+          <button id="shape-convert-circle-area" class="hidden" type="button" data-shape-convert="circle-area"><span>Circle (same area)</span></button>
+          <button id="shape-convert-circle-perimeter" class="hidden" type="button" data-shape-convert="circle-perimeter"><span>Circle (same circumference)</span></button>
+          <button id="shape-convert-polygon" type="button" data-shape-convert="polygon"><i class="fa-solid fa-check" aria-hidden="true"></i><span>Polygon</span></button>
+        </div>
+      </div>
+
+      <section id="editor" class="editor hidden">
+        <div class="editor-head">
+          <strong id="editor-title">Place</strong>
+          <div class="editor-head-actions">
+            <button style="display:none!important" id="history-btn" type="button" class="secondary small hidden">History</button>
+            <button id="editor-close" class="secondary small">Close</button>
+          </div>
+        </div>
+
+        <form id="place-form">
+          <input id="record-id" type="hidden">
+
+          <label>Name
+            <input id="name" required maxlength="200">
+          </label>
+
+          <div class="two-col">
+            <label>Category
+              <select id="category">
+                <option value="">Select category</option>
+                <option value="Tunnel">Tunnel / نفق</option>
+                <option value="Site">Site / موقع</option>
+                <option value="Facility">Facility / منشأة</option>
+                <option value="Area">Area / منطقة</option>
+                <option value="Event">Event / حدث</option>
+                <option value="Other">Other / أخرى</option>
+              </select>
+            </label>
+            <label>Color
+              <select id="place-color">
+                <option value="">Default</option>
+                <option value="#4aa3ff">Blue</option>
+                <option value="#ff5c5c">Red</option>
+                <option value="#42c77a">Green</option>
+                <option value="#e7c84b">Yellow</option>
+                <option value="#f28c45">Orange</option>
+                <option value="#a978ff">Purple</option>
+              <option value="#f472b6">Pink</option>
+                <option value="#3bc7c7">Cyan</option>
+                <option value="#9ca3af" data-exclude-markup-cycle="true">Gray</option>
+              </select>
+            </label>
+          </div>
+
+          <div><input id="tags" type="hidden"><div id="tag-suggestions" class="editor-autocomplete hidden" role="listbox" hidden></div><label>
+              <span class="field-label"><a class="field-title-link" href="https://fontawesome.com/search?ic=free-collection" target="_blank" rel="noopener noreferrer">Icon</a><span class="area-info area-info-left" tabindex="0" aria-label="Icon field information"><span class="area-info-glyph" aria-hidden="true"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></span><span class="area-info-text">Enter a Font Awesome icon name (e.g. tree or fa-tree) or paste SVG icon code.</span></span></span>
+              <input id="icon" placeholder="e.g. rocket or <svg ...>">
+            </label>
+          </div>
+
+          <label class="check-line"><input id="favorite" type="checkbox"> Favorite</label>
+
+          <label>Coordinates
+            <input id="coords" class="readonly-copy" readonly title="Click to copy">
+          </label>
+
+          <label>
+            <span class="field-label">Area <span class="area-info" tabindex="0" aria-label="Area lookup information"><span class="area-info-glyph" aria-hidden="true"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></span><span class="area-info-text">Area lookup: OpenStreetMap / Nominatim.</span></span></span>
+            <input id="area-name" type="text" placeholder="Reverse geocoding..." autocomplete="off">
+          </label>
+
+          <div id="shape-info" hidden style="display:none!important"></div>
+
+          <section class="poi-media-block" aria-labelledby="poi-media-heading">
+            <div class="poi-section-heading">
+              <span id="poi-media-heading">Attachments</span>
+              <button id="poi-add-attachment" type="button" class="secondary small poi-add-button" title="Add images or videos" aria-label="Add images or videos">+ Add</button>
+            </div>
+            <input id="poi-attachment-input" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" multiple hidden>
+            <div id="poi-attachment-list" class="poi-attachment-list"></div>
+            
+          </section>
+
+          <label>Notes
+            <textarea id="notes" rows="1"></textarea>
+          </label>
+
+          <section class="poi-sources-block" aria-labelledby="poi-sources-heading">
+            <div class="poi-section-heading">
+              <span id="poi-sources-heading">Sources</span>
+              <button id="poi-add-source" type="button" class="secondary small poi-add-button" title="Add source" aria-label="Add source">+</button>
+            </div>
+            <div id="poi-source-list" class="poi-source-list"></div>
+          </section>
+
+          <textarea id="custom-fields" hidden style="display:none!important">{}</textarea>
+
+
+          <div id="external-links" hidden style="display:none!important"></div>
+
+          <div class="form-actions">
+            <button type="submit">Save</button>
+            <button id="duplicate-btn" type="button" class="hidden">Duplicate</button>
+            <button id="delete-btn" type="button" class="danger hidden">Delete</button>
+            <div id="place-created-meta" class="place-created-meta hidden">
+              <span id="place-created-value"></span>
+            </div>
+          </div>
+
+        </form>
+        <div id="place-history" class="place-history hidden" style="display:none!important" aria-hidden="true">
+          <button id="history-back" type="button" class="secondary small place-history-back"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i><span>Back to POI</span></button>
+          <div id="history-list" class="place-history-list"></div>
+        </div>
+      </section>
+
+      <div id="map-context-menu" class="map-context-menu hidden" role="menu">
+        <div class="context-coords-row">
+          <button id="context-coords" class="context-copy" type="button" title="Click to copy coordinates">
+            <span class="context-label">Coordinates (click to copy)</span>
+            <span id="context-coords-value" class="context-value"></span>
+          </button>
+        </div>
+        <div id="context-feature-actions" class="context-feature-actions hidden">
+          <div class="context-divider"></div>
+          <button id="context-hide-feature" type="button">Hide boundary</button>
+          <button id="context-convert-feature" class="hidden" type="button">Convert to POI</button>
+        </div>
+        <div class="context-add-wrap">
+          <button id="context-add-btn" class="context-add-btn" type="button" aria-label="Add POI" title="Add POI">+</button>
+          <button id="context-imagery-info-btn" class="context-imagery-info-btn" type="button" aria-label="World Imagery source info"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></button>
+          <div id="context-add-menu" class="context-add-menu hidden">
+            <button type="button" data-context-draw="Marker">Point</button>
+            <button type="button" data-context-draw="Circle">Circle</button>
+            <button type="button" data-context-draw="Polygon">Polygon</button>
+          </div>
+        </div>
+        <div class="context-divider"></div>
+        <div class="context-heading">TOOLS &amp; MARKUPS</div>
+        <button type="button" data-measure="marker">Marker</button>
+        <button type="button" data-measure="distance">Distance (line)</button>
+        <button type="button" data-measure="polygon">Polygon area</button>
+        <button type="button" data-measure="circle">Circle area</button>
+        <button id="context-clear-all-measurements" type="button">Clear all markups</button>
+        <div class="context-divider"></div>
+        <div class="context-heading context-heading-with-info">Area name <span class="area-info" tabindex="0" aria-label="Area lookup information"><span class="area-info-glyph" aria-hidden="true"><svg class="info-icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 17.75C12.4142 17.75 12.75 17.4142 12.75 17V11C12.75 10.5858 12.4142 10.25 12 10.25C11.5858 10.25 11.25 10.5858 11.25 11V17C11.25 17.4142 11.5858 17.75 12 17.75Z" fill="#fff"/><path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="#fff"/><path fill-rule="evenodd" clip-rule="evenodd" d="M1.25 12C1.25 6.06294 6.06294 1.25 12 1.25C17.9371 1.25 22.75 6.06294 22.75 12C22.75 17.9371 17.9371 22.75 12 22.75C6.06294 22.75 1.25 17.9371 1.25 12ZM12 2.75C6.89137 2.75 2.75 6.89137 2.75 12C2.75 17.1086 6.89137 21.25 12 21.25C17.1086 21.25 21.25 17.1086 21.25 12C21.25 6.89137 17.1086 2.75 12 2.75Z" fill="#fff"/></svg></span><span class="area-info-text">Area lookup: OpenStreetMap / Nominatim.</span></span></div>
+        <div id="context-area-name" class="context-area-name">Looking up area...</div>
+        <button id="context-external-links-btn" class="context-external-links-btn" type="button" aria-expanded="false" aria-controls="context-external-links-panel">External map links</button>
+      </div>
+      <div id="context-external-links-panel" class="context-external-links-panel hidden" role="menu" aria-label="External map links">
+        <div id="context-external-links" class="external-links context-external-links"></div>
+      </div>
+      <div id="measurement-context-menu" class="map-context-menu measurement-context-menu hidden" role="menu">
+        <div class="measurement-move-wrap">
+          <button id="measurement-context-move" class="measurement-move-btn" type="button" aria-label="Move whole markup" title="Move whole markup" aria-pressed="false"><svg class="whole-shape-move-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 256 256" aria-hidden="true"><path d="M90.34,61.66a8,8,0,0,1,0-11.32l32-32a8,8,0,0,1,11.32,0l32,32a8,8,0,0,1-11.32,11.32L136,43.31V96a8,8,0,0,1-16,0V43.31L101.66,61.66A8,8,0,0,1,90.34,61.66Zm64,132.68L136,212.69V160a8,8,0,0,0-16,0v52.69l-18.34-18.35a8,8,0,0,0-11.32,11.32l32,32a8,8,0,0,0,11.32,0l32-32a8,8,0,0,0-11.32-11.32Zm83.32-72-32-32a8,8,0,0,0-11.32,11.32L212.69,120H160a8,8,0,0,0,0,16h52.69l-18.35,18.34a8,8,0,0,0,11.32,11.32l32-32A8,8,0,0,0,237.66,122.34ZM43.31,136H96a8,8,0,0,0,0-16H43.31l18.35-18.34A8,8,0,0,0,50.34,90.34l-32,32a8,8,0,0,0,0,11.32l32,32a8,8,0,0,0,11.32-11.32Z"></path></svg></button>
+          <button id="measurement-shape-convert-btn" class="measurement-move-btn measurement-shape-convert-btn" type="button" aria-label="Change markup shape" title="Change markup shape"><svg class="shape-convert-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 256 256" aria-hidden="true"><path d="M213.66,181.66l-32,32a8,8,0,0,1-11.32-11.32L188.69,184H48a8,8,0,0,1,0-16H188.69l-18.35-18.34a8,8,0,0,1,11.32-11.32l32,32A8,8,0,0,1,213.66,181.66Zm-139.32-64a8,8,0,0,0,11.32-11.32L67.31,88H208a8,8,0,0,0,0-16H67.31L85.66,53.66A8,8,0,0,0,74.34,42.34l-32,32a8,8,0,0,0,0,11.32Z"></path></svg></button>
+          <button id="measurement-context-color" class="measurement-move-btn measurement-color-btn" type="button" aria-label="Change markup color" title="Change markup color" aria-expanded="false" aria-controls="measurement-context-color-menu"><i class="fa-regular fa-circle" aria-hidden="true"></i></button>
+          <div id="measurement-context-color-menu" class="measurement-color-menu hidden" role="group" aria-label="Markup color">
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#4aa3ff" style="--measurement-swatch-color:#4aa3ff" aria-label="Blue" title="Blue" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#ff5c5c" style="--measurement-swatch-color:#ff5c5c" aria-label="Red" title="Red" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#42c77a" style="--measurement-swatch-color:#42c77a" aria-label="Green" title="Green" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#e7c84b" style="--measurement-swatch-color:#e7c84b" aria-label="Yellow" title="Yellow" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#f28c45" style="--measurement-swatch-color:#f28c45" aria-label="Orange" title="Orange" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#a978ff" style="--measurement-swatch-color:#a978ff" aria-label="Purple" title="Purple" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#f472b6" style="--measurement-swatch-color:#f472b6" aria-label="Pink" title="Pink" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#3bc7c7" style="--measurement-swatch-color:#3bc7c7" aria-label="Cyan" title="Cyan" aria-pressed="false"><span></span></button>
+          <button class="measurement-color-swatch" type="button" data-measurement-color="#9ca3af" style="--measurement-swatch-color:#9ca3af" aria-label="Gray" title="Gray" aria-pressed="false"><span></span></button>
+        </div>
+          <div id="measurement-shape-convert-menu" class="context-add-menu measurement-shape-convert-menu hidden">
+            <button id="measurement-shape-convert-marker" type="button" data-measurement-shape-convert="marker"><span>Marker</span></button>
+            <button id="measurement-shape-convert-line" type="button" data-measurement-shape-convert="line"><span>Line</span></button>
+            <button id="measurement-shape-convert-circle" type="button" data-measurement-shape-convert="circle"><span id="measurement-shape-convert-circle-label">Circle</span></button>
+            <button id="measurement-shape-convert-circle-area" class="hidden" type="button" data-measurement-shape-convert="circle-area"><span>Circle (same area)</span></button>
+            <button id="measurement-shape-convert-circle-perimeter" class="hidden" type="button" data-measurement-shape-convert="circle-perimeter"><span>Circle (same perimeter)</span></button>
+            <button id="measurement-shape-convert-polygon" type="button" data-measurement-shape-convert="polygon"><span>Polygon</span></button>
+          </div>
+        </div>
+        <button id="measurement-context-lock" type="button">Lock markup</button>
+        <button id="measurement-context-tooltip" type="button">Hide markup tooltip</button>
+        <div class="context-divider"></div>
+        <button id="measurement-context-edit" type="button">Edit markup</button>
+        <button id="measurement-context-duplicate" type="button">Duplicate markup</button>
+        <button id="measurement-context-resequence" class="hidden" type="button">Resequence markers</button>
+        <div class="context-divider"></div>
+        <button id="measurement-context-convert" type="button">Convert to POI</button>
+        <button id="measurement-context-clear" type="button">Clear markup</button>
+        <button id="measurement-context-clear-all" type="button">Clear all markups</button>
+      </div>
+      <div id="current-location-context-menu" class="hidden" hidden></div>
+      <div id="poi-context-menu" class="map-context-menu poi-context-menu hidden" role="menu">
+        <button id="poi-context-copy" type="button">Copy coordinates</button>
+        <button id="poi-context-edit" type="button">Edit</button>
+        <button id="poi-context-duplicate" type="button">Duplicate</button>
+        <div class="context-divider"></div>
+        <button id="poi-context-delete" type="button" class="danger">Move to Trash</button>
+      </div>
+      <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+      <div id="map-center-crosshair" class="map-center-crosshair hidden" aria-hidden="true"></div>
+      <div id="status" class="status" role="button" tabindex="0" aria-expanded="false" aria-controls="goto-controls quick-measurements" title="Click to go to coordinates; middle-click or Shift+Enter for quick measurement switches" aria-keyshortcuts="Shift+Enter">
+        <span id="status-world" class="status-world"></span>
+        <span id="status-coords"></span>
+        <span id="status-zoom" class="status-zoom"></span>
+        <span id="status-zoom-source" class="status-zoom-source" aria-hidden="true" title="Raster source zoom"></span>
+      </div>
+      <div id="goto-controls" class="goto-controls hidden">
+        <input id="goto-coords" class="goto-coords" autocomplete="off" spellcheck="false" aria-label="Go to coordinates" placeholder="GO TO COORDINATES...">
+        <button id="goto-coords-btn" class="goto-coords-btn" type="button">GO</button>
+      </div>
+    </main>
+  </div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/leaflet-rotate/leaflet-rotate.umd.min.js?v=0.2.4"></script>
+  <script src="vendor/geoman/leaflet-geoman.min.js?v=20260906-shift-snap-1"></script>
+  <script src="vendor/protomaps-leaflet/5.1.0/protomaps-leaflet.js?v=20261002-label-capacity-256"></script>
+  <script src="safe-layer-preferences.js"></script>
+  <script src="versatiles.js?v=20261022-water-labels-ar-1"></script>
+  <script src="layers/wc.js?v=20261021-wc-auto-elevation-priority-1"></script>
+  <script src="layers/los-math.js?v=20261021-los-sections-1"></script>
+  <script src="layers/elv.js?v=20261021-los-height-units-and-layout-1"></script>
+  <script src="layers/wiki.js?v=20261018-query-labels-1"></script>
+  <script src="layers/oap.js?v=20261018-boundary-fill-1"></script>
+  <script src="layers/sar.js?v=20261018-boundary-fill-1"></script>
+  <script src="layers/oim.js?v=20261020-oim-idle-loading-1"></script>
+  <script src="layers/ovp.js?v=20261021-layer-middle-selector-1"></script>
+  <script src="sketch.js?v=20261021-sketch-palette-6"></script>
+  <script src="network.js?v=20261017-consolidated-1"></script>
+  <script src="local-store.js"></script>
+  <script src="github-sync.js"></script>
+  <script src="remembered-login.js"></script>
+  <script src="utilities.js?v=20261019-coordinate-input-2"></script>
+  <script src="settings.js?v=20261019-smooth-scale-setting-3"></script>
+  <script src="places.js?v=20261022-privacy-1"></script>
+  <script src="markup.js?v=20261021-los-1"></script>
+  <script src="core.js?v=20261022-project-tracker-1"></script>
+  <script src="report-export.js?v=20261022-2"></script>
+  <script src="app.js?v=20261022-privacy-1"></script>
+</body>
+</html>
