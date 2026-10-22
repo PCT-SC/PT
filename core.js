@@ -767,6 +767,7 @@
     const worldBounds = L.latLngBounds([[-85.05112878, -180], [85.05112878, 180]]);
     const horizontalPanBounds = L.latLngBounds([[-85.05112878, -1000000], [85.05112878, 1000000]]);
     state.map = L.map("map", {
+      attributionControl: false,
       zoomControl: false,
       maxBounds: horizontalPanBounds,
       maxBoundsViscosity: 1.0,
