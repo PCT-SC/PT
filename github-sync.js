@@ -177,13 +177,19 @@
     if(!stillUnused)lastMediaSnapshot=[...remoteFiles].filter(([path])=>/^research\/(places|media)\//.test(path)).sort(([a],[b])=>a.localeCompare(b)).map(([path,sha])=>`${path}:${sha}`).join("|");
     return removed;
   }
+  const mediaDownloads = new Map();
   async function downloadMedia(id, info={}) {
-    if(await storage.readOne("attachments",id))return true;
-    const path=filePath("media",id),sha=remoteFiles.get(path);
-    if(!sha)return false;
-    const bytes=await readBlob(path,sha);
-    await storage.storeRemoteAttachment({id,name:info.name||"Attachment",type:info.type||"application/octet-stream",size:bytes.length,created:new Date().toISOString(),blob:new Blob([bytes],{type:info.type||"application/octet-stream"})});
-    return true;
+    if(mediaDownloads.has(id))return mediaDownloads.get(id);
+    const job=(async()=>{
+      if(await storage.readOne("attachments",id))return true;
+      const path=filePath("media",id),sha=remoteFiles.get(path);
+      if(!sha)return false;
+      const bytes=await readBlob(path,sha);
+      await storage.storeRemoteAttachment({id,name:info.name||"Attachment",type:info.type||"application/octet-stream",size:bytes.length,created:new Date().toISOString(),blob:new Blob([bytes],{type:info.type||"application/octet-stream"})});
+      return true;
+    })();
+    mediaDownloads.set(id,job);
+    try {return await job;} finally {if(mediaDownloads.get(id)===job)mediaDownloads.delete(id);}
   }
   async function uploadMedia(record,progress=null) {
     const refs=Array.isArray(record?.attachments)?record.attachments:[];
@@ -203,34 +209,32 @@
     remoteFiles=await listTree();
     let changed=false,conflicts=0;
     const legacyDeleted=[];
-    const totalPlaces=[...remoteFiles.keys()].filter(path=>/^research\/places\/[^/]+\.bin$/.test(path)).length;
-    let completedPlaces=0;
-    if (progress) progress(0,totalPlaces);
-    for(const [path,sha] of remoteFiles){
-      const match=/^research\/(places)\/([^/]+)\.bin$/.exec(path);
-      if(!match)continue;
-      try {
-      const [,collection,id]=match;
+    const entries=[...remoteFiles].filter(([path])=>/^research\/places\/[^/]+\.bin$/.test(path));
+    let cursor=0,completedPlaces=0,stopped=false;
+    if(progress)progress(0,entries.length);
+    async function loadOne([path,sha]) {
+      const match=/^research\/places\/([^/]+)\.bin$/.exec(path);
+      const collection="places",id=match[1];
       const known=await storage.metadata(path);
       if(known?.sha===sha){
-        // A previous build may have already cached an encrypted deletion marker.
+        // Keep recognizing legacy deletion markers already cached by old builds.
         if(!await storage.readOne(collection,id)){
           const previous=JSON.parse(dec.decode(await readBlob(path,sha)));
           if(previous?.v===1 && previous?.id===id && previous?.collection===collection && previous.deleted)legacyDeleted.push([path,sha]);
         }
-        continue;
+        return;
       }
       const pending=await storage.readOne("sync_outbox",`${collection}:${id}`);
-      if(pending){ if(known?.sha!==sha)conflicts++;continue; }
+      if(pending){if(known?.sha!==sha)conflicts++;return;}
       const existing=await storage.readOne(collection,id);
-      if(existing && !known?.sha) {conflicts++;continue;}
+      if(existing && !known?.sha){conflicts++;return;}
       const payload=JSON.parse(dec.decode(await readBlob(path,sha)));
       if(payload?.v!==1 || payload?.id!==id || payload?.collection!==collection)throw new Error("Encrypted record does not match its repository path.");
       if(payload.record?.id && payload.record.id!==id)throw new Error("Encrypted record has a mismatched ID.");
       if(payload.deleted){
         if(await storage.applyRemote(collection,id,null,sha,path))changed=true;
         legacyDeleted.push([path,sha]);
-        continue;
+        return;
       }
       if(payload.record?.attachments?.length){
         for(const media of payload.record.attachments){
@@ -238,11 +242,20 @@
         }
       }
       if(await storage.applyRemote(collection,id,payload.record,sha,path))changed=true;
-      } finally {
-        completedPlaces++;
-        if (progress) progress(completedPlaces,totalPlaces);
+    }
+    async function worker() {
+      while(!stopped && cursor<entries.length){
+        const entry=entries[cursor++];
+        try {
+          await loadOne(entry);
+          completedPlaces++;
+          if(progress)progress(completedPlaces,entries.length);
+        } catch(error) {stopped=true;throw error;}
       }
     }
+    const results=await Promise.allSettled(Array.from({length:Math.min(4,entries.length)},()=>worker()));
+    const failed=results.find(result=>result.status==="rejected");
+    if(failed)throw failed.reason; // Never reconcile remote deletions from a failed/incomplete pull.
     // GitHub is authoritative: removed remote POI files must disappear locally.
     for(const entry of await storage.remotePlaceMetadata()){
       if(remoteFiles.has(entry.id))continue;
