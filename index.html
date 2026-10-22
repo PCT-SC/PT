@@ -15,6 +15,10 @@
     <div class="boot-box" role="status" aria-live="polite">
       <h1>Project Tracker</h1>
       <div id="boot-status" class="hidden" aria-live="polite"></div>
+      <div id="boot-progress" class="boot-progress" hidden>
+        <div class="boot-progress-meta"><span id="boot-progress-detail"></span><span id="boot-progress-percent">0%</span></div>
+        <div id="boot-progress-track" class="boot-progress-track" role="progressbar" aria-label="Loading Project Tracker" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="boot-progress-bar"></span></div>
+      </div>
       <div class="boot-actions">
         <form id="github-connect-form" class="github-connect-form" autocomplete="off">
           <p class="github-target-summary">Private repository: <strong>PCT-SC/pt-d</strong> (main)</p>

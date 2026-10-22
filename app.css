@@ -2626,6 +2626,13 @@ outline: 2px solid #505050;
 .github-connect-form input:focus { outline:2px solid #85bafe; outline-offset:1px; }
 .github-connect-form button { justify-self:start; margin-top:12px; }
 #boot-status { direction:ltr; text-align:left; font-size:13px; line-height:1.45; overflow-wrap:anywhere; }
+.boot-progress {display:grid; gap:7px; margin:0 0 3px; min-width:0;}
+.boot-progress[hidden] {display:none!important;}
+.boot-progress-meta {display:flex; justify-content:space-between; align-items:baseline; gap:12px; color:#aeb6c0; font-size:11px; line-height:1.45;}
+#boot-progress-detail {min-width:0; overflow-wrap:anywhere;}
+#boot-progress-percent {flex:none; color:#d9dee6; font-variant-numeric:tabular-nums;}
+.boot-progress-track {height:4px; overflow:hidden; border-radius:3px; background:#36383b;}
+#boot-progress-bar {display:block; width:0%; height:100%; background:#a9afb8; transition:width 180ms ease-out;}
 #github-sync-status{cursor:help;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* GitHub sync status and remembered-login controls */

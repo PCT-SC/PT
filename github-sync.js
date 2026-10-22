@@ -12,7 +12,8 @@
   let lastMediaSnapshot = "";
 
   let connection = null, active = false, syncing = null, delayTimer = null, pollTimer = null, needsResync = false;
-  let onChange = () => {}, onStatus = () => {};
+  let onChange = () => {}, onStatus = () => {}, onProgress = () => {};
+  function emitProgress(percent,detail) { try { onProgress({percent,detail}); } catch {} }
   let status = "Not connected", remoteFiles = new Map(), lastError = "";
   let lastAttemptAt=null, lastCheckAt=null, lastSuccessAt=null, conflicts=0, pendingCount=0;
   const snapshot = () => ({connected:!!connection, busy:!!syncing, status, error:lastError, lastAttemptAt, lastCheckAt, lastSuccessAt, conflicts, pendingCount, pollSeconds:POLL_MS/1000});
@@ -178,13 +179,17 @@
       await writeBlob(path,new Uint8Array(await media.blob.arrayBuffer()),null);
     }
   }
-  async function pull() {
+  async function pull(progress=null) {
     remoteFiles=await listTree();
     let changed=false,conflicts=0;
     const legacyDeleted=[];
+    const totalPlaces=[...remoteFiles.keys()].filter(path=>/^research\/places\/[^/]+\.bin$/.test(path)).length;
+    let completedPlaces=0;
+    if (progress) progress(0,totalPlaces);
     for(const [path,sha] of remoteFiles){
       const match=/^research\/(places)\/([^/]+)\.bin$/.exec(path);
       if(!match)continue;
+      try {
       const [,collection,id]=match;
       const known=await storage.metadata(path);
       if(known?.sha===sha){
@@ -213,6 +218,10 @@
         }
       }
       if(await storage.applyRemote(collection,id,payload.record,sha,path))changed=true;
+      } finally {
+        completedPlaces++;
+        if (progress) progress(completedPlaces,totalPlaces);
+      }
     }
     // GitHub is authoritative: removed remote POI files must disappear locally.
     for(const entry of await storage.remotePlaceMetadata()){
@@ -289,26 +298,34 @@
     const branch=TARGET.branch;
     if(!/^[a-zA-Z0-9_.\/-]+$/.test(branch)||branch.includes(".."))throw new Error("Invalid branch name.");
     if(!String(token||"").trim())throw new Error("A GitHub fine-grained repository token is required for uploads.");
+    emitProgress(2,"Deriving encryption key");
     const key=await deriveKey(passphrase,owner,ENCRYPTION_CONTEXT_REPO);
     connection={owner,repo,branch,token:String(token).trim(),key};
+    emitProgress(10,"Checking private repository access");
     try {
       await storage.discardLegacyNonPoiQueue();
       const details=await request(`${baseUrl()}`);
       if(!details.private)throw new Error("Only private GitHub repositories are supported to avoid exposing research metadata.");
-      remoteFiles=await listTree();
+      emitProgress(17,"Checking encrypted research files");
       // Validate the passphrase by decrypting existing data before enabling uploads.
-      await pull();
+      await pull((completed,total)=>{
+        const percent=total?20+Math.floor(54*completed/total):74;
+        emitProgress(percent,total?`Loaded ${completed} of ${total} POIs (including attachments)`:"No remote POIs to download");
+      });
+      emitProgress(77,"Reconciling local and remote changes");
     } catch(e){connection=null;remoteFiles.clear();throw e;}
     active=true;
     lastMediaSnapshot="";
     setStatus("Connected. Downloading encrypted research...");
     clearInterval(pollTimer);pollTimer=setInterval(()=>void sync(),POLL_MS);
+    emitProgress(80,"Synchronizing pending changes and attachments");
     await sync();
+    emitProgress(92,"Finishing encrypted synchronization");
     return true;
   }
   function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
   function onVisibility(){if(document.visibilityState==="visible")void sync();}
   window.addEventListener("pt-local-change",queueSoon);
   document.addEventListener("visibilitychange",onVisibility);
-  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,snapshot,setHandlers:(a,b)=>{onChange=a||onChange;onStatus=b||onStatus;}, publishExisting:storage.queueExisting});
+  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,snapshot,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
 })();

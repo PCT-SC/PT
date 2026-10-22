@@ -641,9 +641,24 @@
   }
 
   let reconnectDotsTimer = null;
+  function showBootProgress(value, detail = "") {
+    if (state.bootState !== "loading") return;
+    const container = $("boot-progress");
+    if (!container) return;
+    const percent = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    container.hidden = false;
+    $("boot-progress-percent").textContent = `${percent}%`;
+    $("boot-progress-detail").textContent = detail;
+    $("boot-progress-bar").style.width = `${percent}%`;
+    $("boot-progress-track").setAttribute("aria-valuenow", String(percent));
+  }
   function setBootState(mode, message = "") {
     if (reconnectDotsTimer !== null) { clearInterval(reconnectDotsTimer); reconnectDotsTimer = null; }
     state.bootState = mode;
+    if (mode !== "loading") {
+      const progress = $("boot-progress");
+      if (progress) progress.hidden = true;
+    }
     const app = $("app");
     const bootScreen = $("boot-screen");
     const bootStatus = $("boot-status");
@@ -686,10 +701,12 @@
     state.bootPromise = (async () => {
       try {
         setBootState("loading", "Loading settings...");
+        showBootProgress(94, "Loading local settings");
         await loadSettings();
         window.FAOverpass?.setBoundaryFillOpacity?.(state.fillOpacity);
         window.FAOverpass?.setOptimizedRendering?.(state.optimizedRendering);
         setBootState("loading", "Preparing map...");
+        showBootProgress(96, "Preparing map");
         if (!state.map) {
           initMap();
         } else {
@@ -698,11 +715,15 @@
         }
         loadProviderPrefs();
         setBootState("loading", "Loading sketches...");
+        showBootProgress(97, "Loading local sketches");
         await window.FASketch?.load?.();
         setBootState("loading", "Loading measurements...");
+        showBootProgress(98, "Loading local measurements");
         await loadLockedMeasurements();
         setBootState("loading", "Loading places...");
+        showBootProgress(99, "Rendering places");
         await loadPlaces();
+        showBootProgress(100, "Ready");
         setBootState("ready");
         requestAnimationFrame(() => state.map?.invalidateSize?.({pan: false}));
         return true;
@@ -2092,7 +2113,9 @@
       // Do not replace a currently open POI editor while the user is typing.
       if(!$("editor")?.classList.contains("hidden")) {showToast("New research downloaded. Close the editor to refresh the map.","info");return;}
       try {await loadPlaces();}catch{showToast("Research downloaded, but map refresh failed. Reopen the application.","error");}
-    }, info => {void refreshSyncPanel(info);});
+    }, info => {void refreshSyncPanel(info);}, progress => {
+      if (state.bootState === "loading") showBootProgress(progress.percent, progress.detail);
+    });
     window.addEventListener("pt-local-change",()=>void refreshSyncPanel());
     async function connectAndStart(token,passphrase) {
       await window.FAGitHubSync.connect({token,passphrase});
@@ -2105,6 +2128,7 @@
       event.preventDefault();
       const button=$("github-connect-btn");button.disabled=true;
       setBootState("loading","Connecting to the private GitHub repository...");
+      showBootProgress(0, "Starting secure connection");
       try {
         await connectAndStart($("github-token").value,$("github-passphrase").value);
         $("github-token").value="";$("github-passphrase").value="";
@@ -3158,6 +3182,7 @@ $("github-forget-login-btn")?.addEventListener("click",async()=>{
     catch(e){setBootState("setup",`${e.message} Enter your token and passphrase to reconnect.`);return;}
     if(!remembered){setBootState("setup");return;}
     setBootState("loading","Reconnecting to GitHub...");
+    showBootProgress(0, "Starting secure connection");
     try{
       await window.FAGitHubSync.connect(remembered);
       if(!await initializeLocalApp())setBootState("setup","Could not open the app. Try reloading.");
