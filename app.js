@@ -727,6 +727,7 @@
         await loadPlaces();
         showBootProgress(100, "Ready");
         setBootState("ready");
+        window.FAGitHubSync.startBackgroundTransfers();
         requestAnimationFrame(() => state.map?.invalidateSize?.({pan: false}));
         return true;
       } catch (err) {

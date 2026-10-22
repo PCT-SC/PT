@@ -288,10 +288,12 @@
     return {id: entry.id, name: entry.name, type: entry.type, size: entry.size};
   }
   async function readAttachment(id) {
-    return transact(MEDIA_STORE, "readonly", (store, done) => {
-      const request = store.get(id);
-      request.onsuccess = () => done(request.result || null);
-    });
+    const cached = await readOne(MEDIA_STORE, id);
+    if (cached || !window.FAGitHubSync?.snapshot?.().connected) return cached;
+    try {
+      if (await window.FAGitHubSync.downloadMedia(id)) return readOne(MEDIA_STORE, id);
+    } catch {}
+    return null;
   }
   async function listAttachments() {
     return transact(MEDIA_STORE, "readonly", (store, done) => {

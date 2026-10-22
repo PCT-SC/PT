@@ -221,6 +221,8 @@
     return removed;
   }
   const mediaDownloads = new Map();
+  const pendingMedia = new Map();
+  let mediaPrefetchStarted = false, mediaPrefetch = null;
   async function downloadMedia(id, info={}) {
     if(mediaDownloads.has(id))return mediaDownloads.get(id);
     const job=(async()=>{
@@ -233,6 +235,23 @@
     })();
     mediaDownloads.set(id,job);
     try {return await job;} finally {if(mediaDownloads.get(id)===job)mediaDownloads.delete(id);}
+  }
+  function startMediaPrefetch() {
+    if(!mediaPrefetchStarted || !active || mediaPrefetch || !pendingMedia.size)return;
+    const session=connection;
+    mediaPrefetch=(async()=>{
+      let firstError=null;
+      async function worker() {
+        while(active && connection===session && pendingMedia.size){
+          const [id,info]=pendingMedia.entries().next().value;
+          pendingMedia.delete(id);
+          try{if(!await downloadMedia(id,info))throw new Error(`Missing remote attachment ${id}.`);}
+          catch(error){if(!firstError)firstError=error;}
+        }
+      }
+      await Promise.all(Array.from({length:Math.min(3,pendingMedia.size)},()=>worker()));
+      if(firstError && connection===session)setStatus("Connected - some attachments could not download",firstError.message);
+    })().finally(()=>{mediaPrefetch=null;if(active && pendingMedia.size)startMediaPrefetch();});
   }
   async function uploadMedia(record,progress=null) {
     const refs=Array.isArray(record?.attachments)?record.attachments:[];
@@ -266,8 +285,16 @@
           const saved=await storage.readOne(collection,id);
           if(saved?.id===id)rememberVerifiedPlaceRefs(path,sha,{v:1,id,collection,record:saved});
         }
+        // Resume missing attachment downloads after an interrupted browser session.
+        const cachedPlace=await storage.readOne(collection,id);
+        if(cachedPlace?.id===id && !await storage.readOne("sync_outbox",`${collection}:${id}`)){
+          for(const media of cachedPlace.attachments||[]){
+            const mediaId=String(media?.id||"");
+            if(/^[a-zA-Z0-9_-]{8,100}$/.test(mediaId) && remoteFiles.has(filePath("media",mediaId)))pendingMedia.set(mediaId,media);
+          }
+        }
         // Keep recognizing legacy deletion markers already cached by old builds.
-        if(!await storage.readOne(collection,id)){
+        if(!cachedPlace){
           const previous=JSON.parse(dec.decode(await readBlob(path,sha)));
           if(previous?.v===1 && previous?.id===id && previous?.collection===collection && previous.deleted)legacyDeleted.push([path,sha]);
         }
@@ -287,7 +314,10 @@
       }
       if(payload.record?.attachments?.length){
         for(const media of payload.record.attachments){
-          if(!await downloadMedia(media.id,media))throw new Error("A referenced attachment is missing from the repository.");
+          const mediaId=String(media?.id||"");
+          if(!/^[a-zA-Z0-9_-]{8,100}$/.test(mediaId)||!remoteFiles.has(filePath("media",mediaId)))
+            throw new Error("A referenced attachment is missing from the repository.");
+          pendingMedia.set(mediaId,media);
         }
       }
       if(await storage.applyRemote(collection,id,payload.record,sha,path))changed=true;
@@ -320,6 +350,7 @@
       // The next check clears stale SHA metadata and any remaining cached record.
     }
     if(changed)onChange();
+    startMediaPrefetch();
     return conflicts;
   }
   async function push(progress=null) {
@@ -398,6 +429,8 @@
     emitProgress(2,"Deriving encryption key");
     const key=await deriveKey(passphrase,owner,ENCRYPTION_CONTEXT_REPO);
     verifiedPlaceRefs.clear();
+    pendingMedia.clear();
+    mediaPrefetchStarted=false;
     connection={owner,repo,branch,token:String(token).trim(),key};
     emitProgress(10,"Checking private repository access");
     try {
@@ -411,18 +444,18 @@
         emitProgress(percent,total?`Loaded ${completed} of ${total} POIs (including attachments)`:"No remote POIs to download");
       });
       emitProgress(77,"Reconciling local and remote changes");
-    } catch(e){connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();throw e;}
+    } catch(e){connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();pendingMedia.clear();throw e;}
     active=true;
     lastMediaSnapshot="";
-    setStatus("Connected. Downloading encrypted research...");
+    setStatus("Connected - POIs loaded; attachment downloads and sync pending");
     clearInterval(pollTimer);pollTimer=setInterval(()=>void sync(),POLL_MS);
-    emitProgress(80,"Synchronizing pending changes and attachments");
-    await sync(emitProgress);
+    emitProgress(92,"Preparing local map");
     return true;
   }
-  function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
+  function startBackgroundTransfers(){mediaPrefetchStarted=true;startMediaPrefetch();queueSoon();}
+  function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();pendingMedia.clear();mediaPrefetchStarted=false;clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
   function onVisibility(){if(document.visibilityState==="visible")void sync();}
   window.addEventListener("pt-local-change",queueSoon);
   document.addEventListener("visibilitychange",onVisibility);
-  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,snapshot,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
+  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,startBackgroundTransfers,snapshot,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
 })();
