@@ -772,7 +772,6 @@
     $("poi-add-attachment").disabled = true;
     const initialId = $("record-id").value;
     const initialSession = editorResearchSession;
-    let videoWarningAccepted = false;
     const stillEditing = () => editorResearchSession === initialSession &&
       !$("editor").classList.contains("hidden") && $("record-id").value === initialId;
     try {
@@ -783,12 +782,6 @@
         if (!isImage && !isVideo) { showToast("Choose a JPG, PNG, WebP, MP4, WebM, or MOV file."); continue; }
         if (file.size > (isImage ? 15 : 25) * 1024 * 1024) { showToast("File is too large (15 MB images, 25 MB videos)."); continue; }
         try {
-          // We cannot remove video metadata safely with the available browser-only codecs.
-          // Obtain explicit consent for retaining an original video file.
-          if (isVideo && !videoWarningAccepted) {
-            videoWarningAccepted = window.confirm("Videos are stored without removing embedded metadata. They may expose device, capture time or GPS information. Add these videos anyway?");
-            if (!videoWarningAccepted) break;
-          }
           const prepared = isImage ? await prepareImage(file) : {
             blob: file,
             name: anonymousMediaName("video", file.type === "video/webm" ? "webm" : file.type === "video/quicktime" ? "mov" : "mp4")
