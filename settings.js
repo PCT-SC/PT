@@ -65,7 +65,7 @@
       hideAllRequiresShift: true,
       externalMapLinks: Object.fromEntries(Object.keys(providers).map(key => [key, true]))
     };
-    return {...defaults, ...RESTORED_PREFERENCES};
+    return {...defaults, ...RESTORED_PREFERENCES, keyboardShortcuts: {...defaults.keyboardShortcuts, ...RESTORED_PREFERENCES.keyboardShortcuts}};
   }
 
   function clearLegacyBrowserSettings() {

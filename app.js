@@ -453,6 +453,8 @@
       window.FAOverpass?.toggleTool?.("ovp");
     } else if (action === "oap") {
       window.FAOverpass?.toggleTool?.("oap");
+    } else if (action === "oim") {
+      window.FAOverpass?.toggleTool?.("oim");
     } else if (action === "elevation") {
       window.FAOverpass?.toggleTool?.("elv");
     } else if (action === "worldcover") {

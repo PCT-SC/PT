@@ -244,6 +244,7 @@
     {id: "sar", label: "Toggle SAR", defaultBinding: "S"},
     {id: "overpass", label: "Toggle OVP", defaultBinding: "V"},
     {id: "oap", label: "Toggle OAP", defaultBinding: "A"},
+    {id: "oim", label: "Toggle OIM", defaultBinding: "I"},
     {id: "elevation", label: "Toggle ELV", defaultBinding: "E"},
     {id: "worldcover", label: "Toggle WC", defaultBinding: "W"},
     {id: "north", label: "Return to north", defaultBinding: "N"},

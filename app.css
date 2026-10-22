@@ -80,6 +80,8 @@ label { display: grid; gap: 5px; color: #cbd0d6; }
 }
 
 .sidebar {
+  display: flex;
+  flex-direction: column;
   position: absolute;
   z-index: 1001;
   top: 0;
@@ -90,7 +92,7 @@ label { display: grid; gap: 5px; color: #cbd0d6; }
   border-right: 1px solid var(--border);
   background: var(--panel);
   padding: 12px;
-  overflow: auto;
+  overflow: hidden;
   transform: translateX(0);
   transition: transform .24s ease;
   will-change: transform;
@@ -171,7 +173,8 @@ input[type="checkbox"] { accent-color: var(--poi-color); }
 }
 .trash-link:hover { border-color: transparent; color: var(--text); }
 
-.place-list { margin-top: 10px; }
+.sidebar > :not(.place-list) { flex-shrink: 0; }
+.place-list { margin-top: 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .place-item {
   border-top: 1px solid var(--border);
   padding: 9px 4px;
