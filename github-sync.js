@@ -104,27 +104,33 @@
     return {head,treeSha,files};
   }
   async function remoteMediaReferences(files,progress=null) {
+    const entries=[...files].filter(([path])=>/^research\/places\/[^/]+\.bin$/.test(path));
     const references=new Set();
-    const places=[...files].filter(([path])=>/^research\/places\/([^/]+)\.bin$/.test(path));
-    let scanned=0;
-    if(progress)progress(0,places.length);
-    for(const [path,sha] of places){
-      const match=/^research\/places\/([^/]+)\.bin$/.exec(path);
-      const payload=JSON.parse(dec.decode(await readBlob(path,sha)));
-      if(payload?.v!==1 || payload?.collection!=="places" || payload?.id!==match[1])
-        throw new Error("Cannot clean attachments: an encrypted POI record is invalid.");
-      if(!payload.deleted){
-        if(!payload.record || !Array.isArray(payload.record.attachments||[]))
-          throw new Error("Cannot clean attachments: an encrypted POI has an invalid attachment list.");
-        for(const item of payload.record.attachments||[]){
-          const id=String(item?.id||"");
-          if(!/^[a-zA-Z0-9_-]{8,100}$/.test(id))throw new Error("Cannot clean attachments: invalid media reference.");
-          references.add(filePath("media",id));
-        }
+    let cursor=0,checked=0,stopped=false;
+    async function worker() {
+      while(!stopped && cursor<entries.length){
+        const [path,sha]=entries[cursor++];
+        try {
+          const match=/^research\/places\/([^/]+)\.bin$/.exec(path);
+          const payload=JSON.parse(dec.decode(await readBlob(path,sha)));
+          if(payload?.v!==1 || payload?.collection!=="places" || payload?.id!==match[1])
+            throw new Error("Cannot clean attachments: an encrypted POI record is invalid.");
+          if(!payload.deleted){
+            if(!payload.record || !Array.isArray(payload.record.attachments||[]))
+              throw new Error("Cannot clean attachments: an encrypted POI has an invalid attachment list.");
+            for(const item of payload.record.attachments||[]){
+              const id=String(item?.id||"");
+              if(!/^[a-zA-Z0-9_-]{8,100}$/.test(id))throw new Error("Cannot clean attachments: invalid media reference.");
+              references.add(filePath("media",id));
+            }
+          }
+          checked++;if(progress)progress(checked,entries.length);
+        } catch(error) {stopped=true;throw error;}
       }
-      scanned++;
-      if(progress)progress(scanned,places.length);
     }
+    const results=await Promise.allSettled(Array.from({length:Math.min(4,entries.length)},()=>worker()));
+    const failed=results.find(result=>result.status==="rejected");
+    if(failed)throw failed.reason; // Never delete media if any POI could not be verified.
     return references;
   }
   async function deleteRemoteFile(path,sha,message) {
