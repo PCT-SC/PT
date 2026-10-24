@@ -21,10 +21,14 @@
     }
     return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? {lat,lon} : null;
   }
+  function decimalDegree(value, positive, negative) {
+    const num = Number(value);
+    return Number.isFinite(num) ? `${Math.abs(num).toFixed(6)}° ${num >= 0 ? positive : negative}` : 'غير متوفرة';
+  }
   function coordText(place) {
     const c = center(place);
     if (!c) return 'غير متوفرة';
-    return `${Math.abs(c.lat).toFixed(6)}° ${c.lat >= 0 ? 'N' : 'S'}, ${Math.abs(c.lon).toFixed(6)}° ${c.lon >= 0 ? 'E' : 'W'}`;
+    return `${c.lat.toFixed(6)}, ${c.lon.toFixed(6)}`;
   }
   const validSources = item => Array.isArray(item?.sources) ? item.sources.map(s => typeof s === 'string' ? s.trim() : text(s?.url).trim()).filter(Boolean) : [];
   function blobToDataUrl(blob) {
@@ -143,7 +147,7 @@
   function wordLocationTable(place) {
     const borders = '<w:tblBorders><w:top w:val="single" w:sz="6" w:color="AAAAAA"/><w:bottom w:val="single" w:sz="6" w:color="AAAAAA"/><w:left w:val="single" w:sz="6" w:color="AAAAAA"/><w:right w:val="single" w:sz="6" w:color="AAAAAA"/><w:insideV w:val="single" w:sz="6" w:color="AAAAAA"/></w:tblBorders>';
     const labelLine = str => wordParagraph(str, {bold:true,rtl:true,align:'right',space:55});
-    const valueLine = (str,ltr) => wordParagraph(str, {bold:true,rtl:!ltr,align:'right',space:85});
+    const valueLine = (str,ltr) => wordParagraph(str, {rtl:!ltr,align:'right',space:85});
     const cell = (label,value,ltr=false) => `<w:tc><w:tcPr><w:tcW w:w="4650" w:type="dxa"/><w:vAlign w:val="center"/><w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="65" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr>${labelLine(label)}${valueLine(value,ltr)}</w:tc>`;
     // bidiVisual renders the first cell on the right in Word and LibreOffice.
     return `<w:tbl><w:tblPr><w:tblW w:w="9300" w:type="dxa"/><w:bidiVisual/>${borders}</w:tblPr><w:tr><w:trPr><w:cantSplit/></w:trPr>${cell('المنطقة',text(place.area_name).trim()||'غير متوفرة')}${cell('الإحداثيات',coordText(place),true)}</w:tr></w:tbl>`;
@@ -224,7 +228,7 @@
       .location-fields{display:grid;grid-template-columns:1fr 1fr;direction:ltr;width:100%;border:1px solid #888;margin-bottom:24px;break-inside:avoid}
       .location-field{min-width:0;padding:9px 12px 8px;display:flex;flex-direction:column;justify-content:center;gap:2px}
       .location-field + .location-field{border-left:1px solid #888}
-      .location-value{font-size:11pt;font-weight:700;line-height:1.6;overflow-wrap:anywhere}
+      .location-value{font-size:11pt;font-weight:400;line-height:1.6;overflow-wrap:anywhere}
       .coordinates .location-value{text-align:right;direction:ltr;unicode-bidi:isolate}
       .area .location-value{text-align:right;direction:rtl}
       .location-label{font-size:10pt;font-weight:700;line-height:1.5;color:#333;direction:rtl;text-align:right}
