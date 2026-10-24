@@ -3806,6 +3806,27 @@
     return select.value || select.dataset.legacyCategory || "";
   }
 
+  let editorNameEdited = false;
+  let editorNameAutoUpdating = false;
+  let editorSuggestedName = "";
+  $("name").addEventListener("input", () => {
+    if (!editorNameAutoUpdating) editorNameEdited = true;
+  });
+  $("category").addEventListener("change", () => {
+    if (editorNameEdited) return;
+    const nameInput = $("name");
+    if (nameInput.value.trim() && nameInput.value !== editorSuggestedName) return;
+    const optionText = $("category").selectedOptions[0]?.textContent || "";
+    const slash = optionText.indexOf("/");
+    const arabicName = slash < 0 ? "" : optionText.slice(slash + 1).trim();
+    if (!/[\u0600-\u06FF]/.test(arabicName)) return;
+    nameInput.value = arabicName;
+    editorSuggestedName = arabicName;
+    editorNameAutoUpdating = true;
+    try { nameInput.dispatchEvent(new Event("input", {bubbles: true})); }
+    finally { editorNameAutoUpdating = false; }
+  });
+
   function populateCategorySuggestions() {
     const list = $("category-suggestions");
     const input = $("category");
@@ -4181,6 +4202,8 @@
     state.placeHistoryRevisions = [];
     $("editor-title").textContent = place ? "Edit place" : "New place";
     $("name").value = place?.name || "";
+    editorNameEdited = Boolean($("name").value.trim());
+    editorSuggestedName = "";
     setEditorCategoryValue(place?.category || "");
     $("tags").value = Array.isArray(place?.tags) ? place.tags.join(", ") : "";
     populateEditorSuggestions();
