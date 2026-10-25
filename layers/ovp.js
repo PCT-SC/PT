@@ -1469,7 +1469,7 @@
     const TOOL_SLOT_MODES = ["ovp", "wc", "elv", "sar", "oap", "wiki", "oim"];
     let layerStrip = null;
     let ungroupedToggle = null;
-    let ungroupedStripOpen = true;
+    let ungroupedStripOpen = false;
     let ungroupedInfoMode = null;
     const toolSlotLabel = mode => mode === "wc" ? "WC" : mode === "elv" ? "ELV" : mode === "sar" ? "SAR" : mode === "oap" ? "OAP" : mode === "wiki" ? "WIKI" : mode === "oim" ? "OIM" : "OVP";
     const toolSlotName = mode => mode === "wc" ? "WorldCover 2021" : mode === "elv" ? "Elevation" : mode === "sar" ? "Open SAR sources" : mode === "oap" ? "OpenAerialMap" : mode === "wiki" ? "Wikipedia" : mode === "oim" ? "OpenInfraMap" : "Overpass";
@@ -1661,7 +1661,7 @@
     ungroupedToggle.type = "button";
     ungroupedToggle.className = "fa-layer-ungrouped-toggle";
     ungroupedToggle.setAttribute("aria-controls", "fa-layer-strip");
-    ungroupedToggle.innerHTML = '<i class="fa-solid fa-angle-up" aria-hidden="true"></i>';
+    ungroupedToggle.innerHTML = '<i class="fa-solid fa-angle-down" aria-hidden="true"></i>';
     mapWrap.appendChild(ungroupedToggle);
     button.setAttribute("aria-controls", "fa-layer-strip");
     button.setAttribute("aria-expanded", "false");
