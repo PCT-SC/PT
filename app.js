@@ -434,7 +434,7 @@
     if (action === "cheatSheet") { toggleShortcutCheatSheet(); return; }
     if (!state.map) return;
     if (action === "home") {
-      const home = state.config.mapStart || {lat: 15.470492, lon: 44.839600, zoom: 7};
+      const home = {lat: 14.963676, lon: 44.271607, zoom: 8};
       resetViewOrientationInstant();
       navigateMap([Number(home.lat), Number(home.lon)], {zoom: Number(home.zoom)});
     } else if (action === "sidebar") {
