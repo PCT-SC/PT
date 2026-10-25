@@ -452,10 +452,28 @@
     emitProgress(92,"Preparing local map");
     return true;
   }
+  async function repoInfo(){
+    if(!connection)return null;
+    const [tree,commit]=await Promise.all([request(`${baseUrl()}/git/trees/${encodeURIComponent(connection.branch)}?recursive=1`),request(`${baseUrl()}/commits/${encodeURIComponent(connection.branch)}`)]);
+    if(tree.truncated)throw new Error("Incomplete repository tree");
+    const types=new Map();
+    for(const p of await storage.readAll("places"))for(const a of p.attachments||[])types.set(String(a.id),String(a.type||"").toLowerCase());
+    const groups={places:[0,0],videos:[0,0],images:[0,0],otherMedia:[0,0],unknown:[0,0],other:[0,0]};
+    let total=0;
+    for(const f of tree.tree||[]){
+      if(f.type!=="blob")continue;
+      const bytes=Number(f.size)||0;
+      const match=/^research\/media\/([^/]+)\.bin$/.exec(f.path);
+      const mime=match?types.get(match[1])||"":"";
+      const group=/^research\/places\/[^/]+\.bin$/.test(f.path)?"places":match?(mime.startsWith("video/")?"videos":mime.startsWith("image/")?"images":mime?"otherMedia":"unknown"):"other";
+      groups[group][0]++;groups[group][1]+=bytes;total+=bytes;
+    }
+    return {total,groups,last:commit.commit?.committer?.date||commit.commit?.author?.date||null};
+  }
   function startBackgroundTransfers(){mediaPrefetchStarted=true;startMediaPrefetch();queueSoon();}
   function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();pendingMedia.clear();mediaPrefetchStarted=false;clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
   function onVisibility(){if(document.visibilityState==="visible")void sync();}
   window.addEventListener("pt-local-change",queueSoon);
   document.addEventListener("visibilitychange",onVisibility);
-  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,startBackgroundTransfers,snapshot,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
+  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,startBackgroundTransfers,repoInfo,snapshot,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
 })();
