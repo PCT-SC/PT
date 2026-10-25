@@ -35,6 +35,7 @@
       filterMapByCategory: false,
       pinFavoritesInSidebar: false,
       showActiveLayerButtons: true,
+      groupAdditionalLayers: false,
       fillOpacity: 0.2,
       coordinateFormat: "dd",
       coordinatesFollowScreenCenter: false,
@@ -115,6 +116,7 @@
       filterMapByCategory: state.filterMapByCategory,
       pinFavoritesInSidebar: state.pinFavoritesInSidebar,
       showActiveLayerButtons: state.showActiveLayerButtons,
+      groupAdditionalLayers: state.groupAdditionalLayers,
       fillOpacity: state.fillOpacity,
       coordinateFormat: state.coordFormat,
       coordinatesFollowScreenCenter: state.followScreenCenter,
@@ -187,6 +189,7 @@
     state.filterMapByCategory = Boolean(merged.filterMapByCategory);
     state.pinFavoritesInSidebar = Boolean(merged.pinFavoritesInSidebar);
     state.showActiveLayerButtons = merged.showActiveLayerButtons !== false;
+    state.groupAdditionalLayers = Boolean(merged.groupAdditionalLayers);
     state.fillOpacity = Math.min(1, Math.max(0, Number(merged.fillOpacity ?? 0.2)));
     state.coordFormat = ["dd", "ddm", "dms"].includes(merged.coordinateFormat) ? merged.coordinateFormat : "dd";
     state.followScreenCenter = Boolean(merged.coordinatesFollowScreenCenter);

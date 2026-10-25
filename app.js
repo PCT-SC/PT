@@ -79,6 +79,7 @@
     filterMapByCategory: false,
     pinFavoritesInSidebar: false,
     showActiveLayerButtons: true,
+    groupAdditionalLayers: false,
     fillOpacity: 0.2,
     coordFormat: "dd",
     followScreenCenter: false,
@@ -609,6 +610,7 @@
     syncHidePoisMapControl();
     $("pin-favorites-sidebar").checked = state.pinFavoritesInSidebar;
     $("show-active-layer-buttons").checked = state.showActiveLayerButtons;
+    $("group-additional-layers").checked = state.groupAdditionalLayers;
     document.documentElement.classList.toggle("hide-active-layer-buttons", !state.showActiveLayerButtons);
     syncBoundaryFillOpacityControl();
     window.FAOIM?.setPointFillOpacity?.(state.fillOpacity);
@@ -2801,6 +2803,7 @@ $("github-forget-login-btn")?.addEventListener("click",async()=>{
 
     window.FAOverpassHost = {
       showActiveToolButtons() { return state.showActiveLayerButtons !== false; },
+      groupAdditionalLayers() { return state.groupAdditionalLayers === true; },
       toast(message, tone = "info") { showToast(message, tone); },
       beforeOpen() {
         if (!closeEditorWithPrompt()) return false;
@@ -2996,6 +2999,12 @@ $("github-forget-login-btn")?.addEventListener("click",async()=>{
     $("show-active-layer-buttons").addEventListener("change", (event) => {
       state.showActiveLayerButtons = event.target.checked;
       document.documentElement.classList.toggle("hide-active-layer-buttons", !state.showActiveLayerButtons);
+      scheduleSettingsSave();
+      window.FAOverpass?.refreshToolSlot?.();
+    });
+
+    $("group-additional-layers").addEventListener("change", (event) => {
+      state.groupAdditionalLayers = event.target.checked;
       scheduleSettingsSave();
       window.FAOverpass?.refreshToolSlot?.();
     });

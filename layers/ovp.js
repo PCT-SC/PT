@@ -1437,6 +1437,7 @@
       setQueryExtentVisible("ovp", true);
     }
     syncOverpassResultButton();
+    syncToolSlotButtonExternal();
   }
 
   function syncOverpassResultButton() {
@@ -1467,8 +1468,14 @@
     button.classList.add("overpass-toggle");
     const TOOL_SLOT_MODES = ["ovp", "wc", "elv", "sar", "oap", "wiki", "oim"];
     let layerStrip = null;
+    let ungroupedToggle = null;
+    let ungroupedStripOpen = true;
+    let ungroupedInfoMode = null;
     const toolSlotLabel = mode => mode === "wc" ? "WC" : mode === "elv" ? "ELV" : mode === "sar" ? "SAR" : mode === "oap" ? "OAP" : mode === "wiki" ? "WIKI" : mode === "oim" ? "OIM" : "OVP";
     const toolSlotName = mode => mode === "wc" ? "WorldCover 2021" : mode === "elv" ? "Elevation" : mode === "sar" ? "Open SAR sources" : mode === "oap" ? "OpenAerialMap" : mode === "wiki" ? "Wikipedia" : mode === "oim" ? "OpenInfraMap" : "Overpass";
+    function layerGroupingEnabled() {
+      return window.FAOverpassHost?.groupAdditionalLayers?.() === true;
+    }
     function toolSlotActive(mode) {
       if (mode === "ovp") return overpassResultsVisible();
       if (mode === "wc") return Boolean(window.FAWorldCover?.isEnabled?.());
@@ -1492,7 +1499,7 @@
     function syncActiveToolButtons() {
       if (!button?.parentNode) return;
       const settingInput = document.getElementById("show-active-layer-buttons");
-      const showPinned = settingInput ? settingInput.checked : window.FAOverpassHost?.showActiveToolButtons?.() !== false;
+      const showPinned = layerGroupingEnabled() && (settingInput ? settingInput.checked : window.FAOverpassHost?.showActiveToolButtons?.() !== false);
       if (!showPinned) {
         for (const pinned of activeToolButtons.values()) pinned.remove();
         activeToolButtons.clear();
@@ -1540,14 +1547,16 @@
       button.classList.toggle("ovp-data-active", toolSlotMode === "ovp" && overpassActive);
       syncActiveToolButtons();
       updateLayerStrip();
+      syncLayerGrouping();
       window.FAOIM?.setSlotSelected?.(toolSlotMode === "oim");
       if (overpassInfo) {
-        const visible = toolSlotMode === "ovp";
+        const visible = toolSlotMode === "ovp" && (layerGroupingEnabled() || overpassActive || ungroupedInfoMode === "ovp");
         overpassInfo.classList.toggle("hidden", !visible);
         if (!visible) closePanel();
       }
       if (wikiInfo) {
-        const visible = toolSlotMode === "wiki";
+        const wikiActive = wikiResultsVisible();
+        const visible = toolSlotMode === "wiki" && (layerGroupingEnabled() || wikiActive || ungroupedInfoMode === "wiki");
         wikiInfo.classList.toggle("hidden", !visible);
         if (!visible) wikiClosePanel();
       }
@@ -1646,7 +1655,14 @@
     layerStrip.setAttribute("aria-label", "Choose map layer");
     layerStrip.setAttribute("aria-hidden", "true");
     layerStrip.innerHTML = TOOL_SLOT_MODES.slice().reverse().map((mode, index) => `<button type="button" class="fa-layer-choice" data-tool-mode="${mode}" style="--layer-index:${index}" aria-label="Select ${toolSlotName(mode)}">${toolSlotLabel(mode)}</button>`).join("");
-    baseButton.closest(".map-wrap").appendChild(layerStrip);
+    const mapWrap = baseButton.closest(".map-wrap");
+    mapWrap.appendChild(layerStrip);
+    ungroupedToggle = document.createElement("button");
+    ungroupedToggle.type = "button";
+    ungroupedToggle.className = "fa-layer-ungrouped-toggle";
+    ungroupedToggle.setAttribute("aria-controls", "fa-layer-strip");
+    ungroupedToggle.innerHTML = '<i class="fa-solid fa-angle-up" aria-hidden="true"></i>';
+    mapWrap.appendChild(ungroupedToggle);
     button.setAttribute("aria-controls", "fa-layer-strip");
     button.setAttribute("aria-expanded", "false");
     function updateLayerStrip() {
@@ -1659,7 +1675,48 @@
         option.setAttribute("aria-pressed", String(selected));
       }
     }
+    function setUngroupedStripOpen(open) {
+      ungroupedStripOpen = Boolean(open);
+      mapWrap.classList.toggle("fa-layer-ungrouped-open", ungroupedStripOpen);
+      layerStrip.setAttribute("aria-hidden", String(!ungroupedStripOpen));
+      ungroupedToggle.setAttribute("aria-expanded", String(ungroupedStripOpen));
+      ungroupedToggle.setAttribute("aria-label", ungroupedStripOpen ? "Hide additional layers" : "Show additional layers");
+      ungroupedToggle.title = ungroupedStripOpen ? "Hide additional layers" : "Show additional layers";
+      const icon = ungroupedToggle.querySelector("i");
+      icon?.classList.toggle("fa-angle-up", ungroupedStripOpen);
+      icon?.classList.toggle("fa-angle-down", !ungroupedStripOpen);
+      if (!ungroupedStripOpen && layerStrip.contains(document.activeElement)) document.activeElement.blur();
+    }
+    ungroupedToggle.addEventListener("click", () => setUngroupedStripOpen(!ungroupedStripOpen));
+    function syncLayerGrouping() {
+      if (!layerStrip) return;
+      const grouped = layerGroupingEnabled();
+      if (grouped) ungroupedInfoMode = null;
+      mapWrap.classList.toggle("fa-layer-ungrouped", !grouped);
+      ungroupedToggle.setAttribute("aria-hidden", String(grouped));
+      if (!grouped) {
+        setUngroupedStripOpen(ungroupedStripOpen);
+        requestAnimationFrame(() => {
+          if (!layerStrip || !mapWrap.classList.contains("fa-layer-ungrouped")) return;
+          const selected = layerStrip.querySelector(`[data-tool-mode="${toolSlotMode}"]`);
+          if (!selected) return;
+          const stripRect = layerStrip.getBoundingClientRect();
+          const selectedRect = selected.getBoundingClientRect();
+          const offset = selectedRect.left + selectedRect.width / 2 - (stripRect.left + stripRect.width / 2);
+          mapWrap.style.setProperty("--fa-layer-selected-offset", `${offset}px`);
+        });
+        mapWrap.classList.remove("fa-layer-strip-open");
+        layerStrip.classList.remove("is-open");
+        button.setAttribute("aria-expanded", "false");
+        return;
+      }
+      mapWrap.classList.remove("fa-layer-ungrouped-open");
+      const open = layerStrip.classList.contains("is-open");
+      layerStrip.setAttribute("aria-hidden", String(!open));
+      button.setAttribute("aria-expanded", String(open));
+    }
     function setLayerStripOpen(open) {
+      if (!layerGroupingEnabled()) { syncLayerGrouping(); return; }
       baseButton.closest(".map-wrap").classList.toggle("fa-layer-strip-open", open);
       layerStrip.classList.toggle("is-open", open);
       layerStrip.setAttribute("aria-hidden", String(!open));
@@ -1667,7 +1724,9 @@
       if (!open && layerStrip.contains(document.activeElement)) document.activeElement.blur();
     }
     document.addEventListener("keydown", event => {
-      if (event.key === "Escape") setLayerStripOpen(false);
+      if (event.key !== "Escape") return;
+      if (layerGroupingEnabled()) setLayerStripOpen(false);
+      else setUngroupedStripOpen(false);
     });
     document.addEventListener("pointerdown", event => {
       if (!layerStrip.contains(event.target) && event.target !== button) setLayerStripOpen(false);
@@ -1679,16 +1738,21 @@
       event.stopPropagation();
       const mode = option.dataset.toolMode;
       if (!TOOL_SLOT_MODES.includes(mode)) return;
-      setLayerStripOpen(false);
+      const grouped = layerGroupingEnabled();
+      const wasActive = toolSlotActive(mode);
+      if (grouped) setLayerStripOpen(false);
       closePanel();
       toolSlotMode = mode;
+      if (!grouped) ungroupedInfoMode = wasActive ? null : mode;
       try { localStorage.setItem(TOOL_SLOT_STORAGE_KEY, mode); } catch {}
       syncToolSlotButton();
+      if (!grouped) { button.click(); return; }
       if (mode === "ovp") activateToolSlot();
       else if (mode === "wiki") wikiInfo?.querySelector(".tool-settings-info-button")?.click();
       else if (!toolSlotActive(mode)) activateToolSlot();
     });
     updateLayerStrip();
+    syncLayerGrouping();
 
     function bindOverlayOpacityControl(legend, sliderId, valueId, resetId, defaultPercent, apiGetter) {
       const slider = legend?.querySelector(`#${sliderId}`);

@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/geoman/leaflet-geoman.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-  <link rel="stylesheet" href="app.css?v=20261025-sync-native-1">
+  <link rel="stylesheet" href="app.css?v=20261025-layer-toggle-arrow-fine-1">
 </head>
 <body>
   <div id="boot-screen" class="boot-screen hidden" data-state="loading" lang="en" dir="ltr" data-no-translate>
@@ -207,6 +207,7 @@
           <label class="check-line"><input id="center-coords-toggle" type="checkbox"> Coordinates follow crosshair</label>
           <label id="invert-crosshair-setting" class="check-line"><input id="invert-crosshair-toggle" type="checkbox"> Invert crosshair color</label>
           <label class="check-line"><input id="show-active-layer-buttons" type="checkbox"> Show active layer buttons beside layer selector</label>
+          <label class="check-line"><input id="group-additional-layers" type="checkbox"> Group additional layers</label>
           <label class="check-line"><input id="category-map-filter" type="checkbox"> Filter map POIs by sidebar category</label>
           <label class="check-line"><input id="black-unavailable-satellite-tiles" type="checkbox"> Black unavailable satellite tiles</label>
           <div class="range-setting"><div class="range-setting-head"><label for="fill-opacity">Boundary fill opacity</label><button id="fill-opacity-reset" class="secondary small satellite-brightness-reset" type="button">Reset</button></div>
@@ -556,26 +557,26 @@
   <script src="layers/oap.js?v=20261018-boundary-fill-1"></script>
   <script src="layers/sar.js?v=20261018-boundary-fill-1"></script>
   <script src="layers/oim.js?v=20261020-oim-idle-loading-1"></script>
-  <script src="layers/ovp.js?v=20261021-layer-middle-selector-1"></script>
+  <script src="layers/ovp.js?v=20261025-layer-toggle-small-1"></script>
   <script src="sketch.js?v=20261021-sketch-palette-6"></script>
   <script src="network.js?v=20261017-consolidated-1"></script>
   <script src="local-store.js?v=20261023-fast-first-load-1"></script>
   <script src="github-sync.js?v=20261025-repo-info-1"></script>
   <script src="remembered-login.js"></script>
   <script src="utilities.js?v=20261023-sidebar-oim-1"></script>
-  <script src="settings.js?v=20261023-sidebar-oim-1"></script>
+  <script src="settings.js?v=20261025-layer-grouping-1"></script>
   <script src="places.js?v=20261024-arabic-name-1"></script>
   <script src="markup.js?v=20261021-los-1"></script>
   <script src="core.js?v=20261022-project-tracker-1"></script>
   <script src="report-export.js?v=20261024-plain-decimal-1"></script>
-  <script src="app.js?v=20261025-space-home-z8-1"></script>
+  <script src="app.js?v=20261025-layer-grouping-1"></script>
   <style>.sync-status-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.sync-updated{font-size:10px;color:#aeb6c0;text-align:right}.sync-usage{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;margin:10px 0 0;padding:9px 0;font-size:11px}.sync-usage>strong{font-size:12px;font-weight:400}.sync-usage .area-info{margin-left:0}.sync-usage .area-info-text{top:auto;bottom:calc(100% + 6px);left:auto;right:0;transform:none;width:220px;max-width:min(220px,calc(100vw - 48px));white-space:normal}.sync-usage-breakdown{display:grid;gap:4px}.sync-usage-breakdown div{display:flex;justify-content:space-between;gap:8px}.sync-advanced>summary{display:list-item}.sync-updated{white-space:nowrap}</style>
   <script>(()=>{
     const panel=document.getElementById("sync-popover"),button=document.getElementById("sync-toolbar-btn"),box=panel.querySelector(".sync-simple-status"),name=document.getElementById("sync-view-connection");
     const head=document.createElement("div");head.className="sync-status-head";box.prepend(head);head.append(name);
     const updated=document.createElement("span");updated.className="sync-updated";updated.textContent="--";head.append(updated);
     const usage=document.createElement("div");usage.className="sync-usage";const infoGlyph=(document.querySelector(".area-info-glyph")?.innerHTML)||"i";usage.innerHTML='<span>PTD stored data</span><strong>--</strong><span class="area-info sync-usage-info" tabindex="0" aria-label="Repository storage breakdown"><span class="area-info-glyph" aria-hidden="true">'+infoGlyph+'</span><span class="area-info-text"><span class="sync-usage-breakdown">Loading...</span></span></span>';
-    const advanced=panel.querySelector(".sync-advanced"),summary=advanced.querySelector("summary");summary.textContent="Storage & connection";summary.after(usage);
+    const advanced=panel.querySelector(".sync-advanced"),summary=advanced.querySelector("summary");summary.textContent="Storage & connection";const summaryChevron=document.createElement("i");summaryChevron.className="fa-solid fa-chevron-down sync-advanced-chevron";summaryChevron.setAttribute("aria-hidden","true");summary.append(summaryChevron);const syncSummaryChevron=()=>{summaryChevron.classList.toggle("fa-chevron-down",!advanced.open);summaryChevron.classList.toggle("fa-chevron-up",advanced.open)};advanced.addEventListener("toggle",syncSummaryChevron);syncSummaryChevron();summary.after(usage);
     const total=usage.querySelector("strong"),breakdown=usage.querySelector(".sync-usage-breakdown");
     const relative=d=>{const sec=Math.max(0,Math.floor((Date.now()-d.getTime())/1000));return !Number.isFinite(sec)?"Unknown":sec<45?"Just now":sec<3600?Math.floor(sec/60)+"m ago":sec<86400?Math.floor(sec/3600)+"h ago":sec<604800?Math.floor(sec/86400)+"d ago":Math.floor(sec/604800)+"w ago"};const size=n=>n>=1048576?(n/1048576).toFixed(2)+" MiB":n>=1024?(n/1024).toFixed(1)+" KiB":n+" B";
     let cache=null,checked=0,loading=null;
