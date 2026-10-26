@@ -625,6 +625,32 @@
   let editorResearchSession = 0;
   let untitlingShiftHeld = false;
 
+  function normalizedVideoHost(value) {
+    const host=value && typeof value==="object" ? value : null;
+    const fileId=String(host?.fileId||"");
+    const url=String(host?.url||"");
+    return host?.provider==="gdrive" && /^[A-Za-z0-9_-]{10,200}$/.test(fileId) && /^https:\/\/drive\.google\.com\//.test(url) ? {provider:"gdrive",fileId,url} : null;
+  }
+  function attachmentRecord(item) {
+    const host=normalizedVideoHost(item?.video_host);
+    return {id:item.id,name:item.name,type:item.type,size:item.size,...(item.fileDate?{fileDate:item.fileDate}:{}),...(host?{video_host:host}:{})};
+  }
+  async function ensureHostedEditorVideos() {
+    const pending=editorAttachments.filter(item=>String(item?.type||"").toLowerCase().startsWith("video/") && !normalizedVideoHost(item.video_host));
+    if(!pending.length)return;
+    if(!window.FAGitHubSync?.snapshot?.().connected)throw new Error("Connect to GitHub before saving video attachments.");
+    showToast(`Uploading ${pending.length===1?"video copy":`${pending.length} video copies`}...`);
+    for(const item of pending){
+      const stored=await window.FALocalStore.readAttachment(item.id);
+      const existing=normalizedVideoHost(stored?.video_host);
+      if(existing){item.video_host=existing;continue;}
+      if(!(stored?.blob instanceof Blob))throw new Error(`Missing local video ${item.name||item.id}.`);
+      const host=await window.FAGitHubSync.uploadHostedVideo(stored.blob,item.name||stored.name||"video");
+      item.video_host=host;
+      await window.FALocalStore.setAttachmentVideoHost(item.id,host);
+    }
+  }
+
   function updateUntitleAttachmentButton() {
     const button = $("poi-untitle-attachments");
     button.hidden = !untitlingShiftHeld || !editorAttachments.length || addingAttachments ||
@@ -832,7 +858,7 @@
         const isImage = ["image/jpeg", "image/png", "image/webp"].includes(file.type);
         const isVideo = ["video/mp4", "video/webm", "video/quicktime"].includes(file.type);
         if (!isImage && !isVideo) { showToast("Choose a JPG, PNG, WebP, MP4, WebM, or MOV file."); continue; }
-        if (file.size > (isImage ? 15 : 25) * 1024 * 1024) { showToast("File is too large (15 MB images, 25 MB videos)."); continue; }
+        if (file.size > (isImage ? 15 : 12) * 1024 * 1024) { showToast("File is too large (15 MB images, 12 MB videos)."); continue; }
         try {
           const prepared = isImage ? await prepareImage(file) : {
             blob: file,
@@ -871,7 +897,7 @@
   }
 
   function finishSavedResearch(oldAttachments = []) {
-    const removed = oldAttachments.filter(item => !editorAttachments.some(next => next.id === item.id)).map(item => item.id);
+    const removed = oldAttachments.filter(item => !editorAttachments.some(next => next.id === item.id));
     newlyAddedAttachmentIds = new Set();
     if (removed.length) void window.FALocalStore.deleteUnreferencedAttachments(removed).catch(() => {});
   }
@@ -1079,7 +1105,7 @@
       tags: $("tags").value,
       notes: $("notes").value,
       sources: editorSources(),
-      attachments: editorAttachments.map(({id, name, type, size, fileDate}) => ({id, name, type, size, ...(fileDate ? {fileDate} : {})})),
+      attachments: editorAttachments.map(attachmentRecord),
       custom_fields: $("custom-fields").value,
       area_name: $("area-name").value,
       area_custom: state.editorAreaCustom,
@@ -4544,6 +4570,9 @@
     }
     const colorOverride = validPoiColor($("place-color").value);
 
+    try { await ensureHostedEditorVideos(); }
+    catch (err) { showToast(`Video hosting failed: ${err.message}`); return; }
+
     const geo = serializeLayer(layer);
     const payload = {
       name: $("name").value.trim(),
@@ -4551,7 +4580,7 @@
       tags: $("tags").value.split(",").map(s => s.trim()).filter(Boolean),
       notes: $("notes").value,
       sources: editorSources(),
-      attachments: editorAttachments.map(({id, name, type, size, fileDate}) => ({id, name, type, size, ...(fileDate ? {fileDate} : {})})),
+      attachments: editorAttachments.map(attachmentRecord),
       custom_fields: customFields,
       geometry: geo.geometry,
       shape_type: geo.shape_type,
@@ -4634,6 +4663,9 @@
       return;
     }
 
+    try { await ensureHostedEditorVideos(); }
+    catch (err) { showToast(`Video hosting failed: ${err.message}`); return; }
+
     const geo = serializeLayer(layer);
     const payload = {
       name: `${baseName}  (duplicate)`,
@@ -4641,7 +4673,7 @@
       tags: $("tags").value.split(",").map(s => s.trim()).filter(Boolean),
       notes: $("notes").value,
       sources: editorSources(),
-      attachments: editorAttachments.map(({id, name, type, size, fileDate}) => ({id, name, type, size, ...(fileDate ? {fileDate} : {})})),
+      attachments: editorAttachments.map(attachmentRecord),
       custom_fields: customFields,
       geometry: geo.geometry,
       shape_type: geo.shape_type,
@@ -4825,7 +4857,7 @@ This cannot be undone.`)) return;
     try {
       await api(`/collections/places/records/${id}`, {method: "DELETE"});
       if (Array.isArray(place.attachments) && place.attachments.length) {
-        await window.FALocalStore.deleteUnreferencedAttachments(place.attachments.map(file => file.id));
+        await window.FALocalStore.deleteUnreferencedAttachments(place.attachments);
       }
       state.deletedPlaces = state.deletedPlaces.filter(item => item.id !== id);
       state.deletedCount = Math.max(0, state.deletedCount - 1);

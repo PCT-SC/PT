@@ -9,6 +9,9 @@
   const ENCRYPTION_CONTEXT_REPO = "project-tracker";
   const enc = new TextEncoder(), dec = new TextDecoder();
   const POLL_MS = 30000, DEBOUNCE_MS = 900, MAX_MEDIA_BYTES = 12 * 1024 * 1024;
+  const VIDEO_WORKER = "https://pt-video.cloudflaresc-aqvny-a60.workers.dev";
+  const VIDEO_KEY_PATH = "research/config/video-api.bin";
+  const VIDEO_CHUNK_BYTES = 8 * 1024 * 1024;
   let lastMediaSnapshot = "";
   // References are trusted only for the exact encrypted Git blob SHA.
   // They never contain attachment bytes or original filenames.
@@ -35,7 +38,7 @@
   function emitProgress(percent,detail) { try { onProgress({percent,detail}); } catch {} }
   let status = "Not connected", remoteFiles = new Map(), lastError = "";
   let lastAttemptAt=null, lastCheckAt=null, lastSuccessAt=null, conflicts=0, pendingCount=0;
-  const snapshot = () => ({connected:!!connection, busy:!!syncing, status, error:lastError, lastAttemptAt, lastCheckAt, lastSuccessAt, conflicts, pendingCount, pollSeconds:POLL_MS/1000});
+  const snapshot = () => ({connected:!!connection, videoHosting:!!connection?.videoApiKey, busy:!!syncing, status, error:lastError, lastAttemptAt, lastCheckAt, lastSuccessAt, conflicts, pendingCount, pollSeconds:POLL_MS/1000});
   function setStatus(message,error="") { status=message;lastError=error;try{onStatus(snapshot());}catch{} }
   const toBase64 = bytes => { let result="";for(let i=0;i<bytes.length;i+=0x8000) result+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return btoa(result); };
   const fromBase64 = text => Uint8Array.from(atob(text.replace(/\s/g,"")),c=>c.charCodeAt(0));
@@ -74,6 +77,107 @@
       e.status=result.status;e.retryAfter=result.headers.get("retry-after");throw e;
     }
     return data;
+  }
+  async function readEncryptedConfig(path) {
+    let file;
+    try { file=await request(`${baseUrl()}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(connection.branch)}`); }
+    catch(error){if(error.status===404)return null;throw error;}
+    if(file?.type!=="file" || file.encoding!=="base64" || !file.content || !/^[a-f0-9]{40}$/i.test(file.sha||""))throw new Error("Invalid encrypted video-hosting configuration.");
+    return {sha:file.sha,plain:await decrypt(path,fromBase64(file.content))};
+  }
+  async function loadVideoApiKey() {
+    const saved=await readEncryptedConfig(VIDEO_KEY_PATH);
+    if(!saved)return null;
+    let payload;
+    try {payload=JSON.parse(dec.decode(saved.plain));} catch {throw new Error("Cannot read encrypted video-hosting configuration.");}
+    const key=String(payload?.key||"").trim();
+    if(payload?.v!==1 || payload?.kind!=="pt-video-api-key" || key.length<20)throw new Error("Invalid encrypted video-hosting configuration.");
+    return key;
+  }
+  async function provisionVideoApiKey(value) {
+    if(!connection)throw new Error("Connect to GitHub first.");
+    const key=String(value||"").trim();
+    if(key.length<20)throw new Error("The video API key is invalid.");
+    const existing=await readEncryptedConfig(VIDEO_KEY_PATH);
+    const payload=enc.encode(JSON.stringify({v:1,kind:"pt-video-api-key",key}));
+    await writeBlob(VIDEO_KEY_PATH,payload,existing?.sha||null);
+    connection.videoApiKey=key;
+    return true;
+  }
+  async function videoApi(path,body) {
+    if(!connection?.videoApiKey)throw new Error("Video hosting is not configured for this research repository.");
+    let response;
+    try {response=await fetch(`${VIDEO_WORKER}${path}`,{method:"POST",headers:{"Authorization":`Bearer ${connection.videoApiKey}`,"Content-Type":"application/json"},body:JSON.stringify(body||{}),cache:"no-store"});}
+    catch {throw new Error("Video hosting service is unavailable.");}
+    let data=null;try{data=await response.json();}catch{}
+    if(!response.ok){const error=new Error(String(data?.error||`Video hosting HTTP ${response.status}`));error.status=response.status;error.remoteStatus=Number(data?.status)||0;throw error;}
+    return data||{};
+  }
+  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  function uploadedOffset(response,fallback) {
+    const range=response.headers.get("Range")||"";
+    const match=/(?:bytes=)?\d+-(\d+)$/.exec(range);
+    return match?Number(match[1])+1:fallback;
+  }
+  async function queryVideoUpload(sessionUrl,total) {
+    const response=await fetch(sessionUrl,{method:"PUT",headers:{"Content-Range":`bytes */${total}`}});
+    if(response.ok)return {done:true,file:await response.json()};
+    if(response.status===308)return {done:false,offset:uploadedOffset(response,0)};
+    const error=new Error(`Google Drive upload status HTTP ${response.status}`);
+    error.restart=response.status===404 || response.status===410 || (response.status>=400 && response.status<500 && response.status!==429);
+    throw error;
+  }
+  async function uploadVideoSession(sessionUrl,blob,onProgress) {
+    let offset=0,retries=0;
+    while(offset<blob.size){
+      const end=Math.min(offset+VIDEO_CHUNK_BYTES,blob.size);
+      let response=null;
+      try {response=await fetch(sessionUrl,{method:"PUT",headers:{"Content-Range":`bytes ${offset}-${end-1}/${blob.size}`},body:blob.slice(offset,end)});} catch {}
+      if(response?.status===308){offset=uploadedOffset(response,end);retries=0;if(onProgress)onProgress(offset/blob.size);continue;}
+      if(response?.ok){if(onProgress)onProgress(1);return response.json();}
+      if(response && response.status>=400 && response.status<500 && response.status!==429){const error=new Error(`Google Drive upload HTTP ${response.status}`);error.restart=true;throw error;}
+      if(++retries>4)throw new Error("Google Drive video upload could not be resumed.");
+      await wait(Math.min(8000,500*Math.pow(2,retries-1)));
+      try {
+        const status=await queryVideoUpload(sessionUrl,blob.size);
+        if(status.done){if(onProgress)onProgress(1);return status.file;}
+        offset=status.offset;
+      } catch(error){if(error.restart)throw error;}
+    }
+    throw new Error("Google Drive video upload did not complete.");
+  }
+  async function uploadHostedVideo(blob,name,onProgress=null) {
+    if(!(blob instanceof Blob) || !String(blob.type||"").toLowerCase().startsWith("video/"))throw new Error("Invalid video attachment.");
+    for(let attempt=0;attempt<3;attempt++){
+      const session=await videoApi("/api/upload/start",{name:String(name||"video").slice(0,240),mimeType:blob.type,size:blob.size});
+      if(!/^https:\/\/www\.googleapis\.com\//.test(String(session.sessionUrl||"")))throw new Error("Video host returned an invalid upload session.");
+      try {
+        const file=await uploadVideoSession(session.sessionUrl,blob,onProgress);
+        const fileId=String(file?.id||"");
+        if(!/^[A-Za-z0-9_-]{10,200}$/.test(fileId))throw new Error("Google Drive did not return a valid video file ID.");
+        try {
+          const shared=await videoApi("/api/share",{fileId});
+          const url=String(shared?.url||"");
+          if(!/^https:\/\/drive\.google\.com\//.test(url))throw new Error("Video host did not return a valid viewing link.");
+          return {provider:"gdrive",fileId,url};
+        } catch(error){try{await videoApi("/api/delete",{fileId});}catch{}throw error;}
+      } catch(error){if(error.restart && attempt<2)continue;throw error;}
+    }
+    throw new Error("Google Drive video upload failed.");
+  }
+  let videoDeleteRunning=null;
+  async function processHostedVideoDeletes() {
+    if(videoDeleteRunning || !connection?.videoApiKey)return videoDeleteRunning;
+    const session=connection;
+    videoDeleteRunning=(async()=>{
+      for(const item of await storage.videoDeleteQueue()){
+        if(connection!==session)break;
+        const due=Date.parse(item.nextAttempt||"");if(Number.isFinite(due)&&due>Date.now())continue;
+        try {await videoApi("/api/delete",{fileId:item.fileId});await storage.ackVideoDelete(item.id);}
+        catch(error){if(error.remoteStatus===404)await storage.ackVideoDelete(item.id);else await storage.deferVideoDelete(item.id,error.message);}
+      }
+    })().finally(()=>{videoDeleteRunning=null;});
+    return videoDeleteRunning;
   }
   async function listTree() {
     const url=`${baseUrl()}/git/trees/${encodeURIComponent(connection.branch)}?recursive=1`;
@@ -230,7 +334,7 @@
       const path=filePath("media",id),sha=remoteFiles.get(path);
       if(!sha)return false;
       const bytes=await readBlob(path,sha);
-      await storage.storeRemoteAttachment({id,name:info.name||"Attachment",type:info.type||"application/octet-stream",size:bytes.length,created:new Date().toISOString(),blob:new Blob([bytes],{type:info.type||"application/octet-stream"})});
+      await storage.storeRemoteAttachment({id,name:info.name||"Attachment",type:info.type||"application/octet-stream",size:bytes.length,created:new Date().toISOString(),blob:new Blob([bytes],{type:info.type||"application/octet-stream"}),...(info.video_host?{video_host:info.video_host}:{})});
       return true;
     })();
     mediaDownloads.set(id,job);
@@ -414,6 +518,7 @@
           lastSuccessAt=lastCheckAt;
           setStatus(removed ? `Up to date - removed ${removed} unused attachment(s)` : "Up to date - encrypted GitHub sync active");
         }
+        try {await processHostedVideoDeletes();} catch {}
         if(progress)progress(92,"Finishing encrypted synchronization");
       }catch(e){setStatus("Offline or sync failed - local changes retained",e?.message||"Unknown error");}
     })().finally(()=>{syncing=null;onStatus(snapshot());if(needsResync){needsResync=false;queueSoon();}});
@@ -431,12 +536,13 @@
     verifiedPlaceRefs.clear();
     pendingMedia.clear();
     mediaPrefetchStarted=false;
-    connection={owner,repo,branch,token:String(token).trim(),key};
+    connection={owner,repo,branch,token:String(token).trim(),key,videoApiKey:null};
     emitProgress(10,"Checking private repository access");
     try {
       await storage.discardLegacyNonPoiQueue();
       const details=await request(`${baseUrl()}`);
       if(!details.private)throw new Error("Only private GitHub repositories are supported to avoid exposing research metadata.");
+      connection.videoApiKey=await loadVideoApiKey();
       emitProgress(17,"Checking encrypted research files");
       // Validate the passphrase by decrypting existing data before enabling uploads.
       await pull((completed,total)=>{
@@ -470,10 +576,10 @@
     }
     return {total,groups,last:commit.commit?.committer?.date||commit.commit?.author?.date||null};
   }
-  function startBackgroundTransfers(){mediaPrefetchStarted=true;startMediaPrefetch();queueSoon();}
+  function startBackgroundTransfers(){mediaPrefetchStarted=true;startMediaPrefetch();void processHostedVideoDeletes();queueSoon();}
   function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();pendingMedia.clear();mediaPrefetchStarted=false;clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
   function onVisibility(){if(document.visibilityState==="visible")void sync();}
   window.addEventListener("pt-local-change",queueSoon);
   document.addEventListener("visibilitychange",onVisibility);
-  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,startBackgroundTransfers,repoInfo,snapshot,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
+  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,startBackgroundTransfers,repoInfo,snapshot,uploadHostedVideo,provisionVideoApiKey,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
 })();

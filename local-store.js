@@ -7,6 +7,7 @@
   const MEDIA_STORE = "attachments";
   const OUTBOX = "sync_outbox";
   const REMOTE = "sync_remote";
+  const VIDEO_DELETE_OUTBOX = "video_delete_outbox";
   const SYNC_COLLECTIONS = ["places"];
   let opening = null;
 
@@ -17,10 +18,10 @@
         reject(new Error("IndexedDB is unavailable in this browser or browsing mode."));
         return;
       }
-      const request = indexedDB.open(DB_NAME, 3);
+      const request = indexedDB.open(DB_NAME, 4);
       request.onupgradeneeded = () => {
         const db = request.result;
-        for (const name of [...COLLECTIONS, MEDIA_STORE, OUTBOX, REMOTE]) {
+        for (const name of [...COLLECTIONS, MEDIA_STORE, OUTBOX, REMOTE, VIDEO_DELETE_OUTBOX]) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, {keyPath: "id"});
         }
       };
@@ -178,7 +179,7 @@
         if(outbox.result){result.conflict=true;return;}
         const old=tx.objectStore("places").get(id);
         old.onsuccess=()=>{
-          result.attachments=Array.isArray(old.result?.attachments)?old.result.attachments.map(a=>a.id).filter(Boolean):[];
+          result.attachments=Array.isArray(old.result?.attachments)?old.result.attachments.map(a=>clone(a)).filter(a=>a?.id):[];
           result.removed=!!old.result;
           tx.objectStore("places").delete(id);
           tx.objectStore(REMOTE).delete(path);
@@ -194,7 +195,10 @@
       const tx=db.transaction(MEDIA_STORE,"readwrite");
       const store=tx.objectStore(MEDIA_STORE);
       const req=store.get(entry.id);
-      req.onsuccess=()=>{ if(!req.result) store.put(entry); };
+      req.onsuccess=()=>{
+        if(!req.result) store.put(entry);
+        else if(entry.video_host && !req.result.video_host) store.put({...req.result,video_host:clone(entry.video_host)});
+      };
       tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
     });
   }
@@ -301,22 +305,66 @@
       request.onsuccess = () => done(request.result || []);
     });
   }
-  async function deleteUnreferencedAttachments(ids) {
-    const idsToCheck = [...new Set(ids.map(String).filter(Boolean))];
-    if (!idsToCheck.length) return;
-    // A duplicated place may reference the same attachment, so check all places before removing a blob.
-    const places = await transact("places", "readonly", (store, done) => {
-      const request = store.getAll();
-      request.onsuccess = () => done(request.result || []);
-    });
-    const referenced = new Set(places.flatMap(place =>
-      Array.isArray(place.attachments) ? place.attachments.map(item => String(item.id)) : []));
-    const unused = idsToCheck.filter(id => !referenced.has(id));
-    if (!unused.length) return;
-    await transact(MEDIA_STORE, "readwrite", store => {
-      for (const id of unused) store.delete(id);
+  function normalizedVideoHost(value) {
+    const host=value && typeof value==="object" ? value : null;
+    const fileId=String(host?.fileId||"");
+    const url=String(host?.url||"");
+    if(host?.provider!=="gdrive" || !/^[A-Za-z0-9_-]{10,200}$/.test(fileId) || !/^https:\/\/drive\.google\.com\//.test(url))return null;
+    return {provider:"gdrive",fileId,url};
+  }
+  async function setAttachmentVideoHost(id, host) {
+    const normalized=normalizedVideoHost(host);
+    if(!normalized)throw new Error("Invalid hosted video metadata.");
+    await transact(MEDIA_STORE,"readwrite",store=>{
+      const req=store.get(String(id));
+      req.onsuccess=()=>{if(req.result)store.put({...req.result,video_host:normalized});};
     });
   }
-  window.FALocalStore = Object.freeze({api, database, saveAttachment, readAttachment, listAttachments, deleteUnreferencedAttachments,
+  async function videoDeleteQueue() { return readAll(VIDEO_DELETE_OUTBOX); }
+  async function ackVideoDelete(id) { await transact(VIDEO_DELETE_OUTBOX,"readwrite",store=>store.delete(String(id))); }
+  async function deferVideoDelete(id,error) {
+    await transact(VIDEO_DELETE_OUTBOX,"readwrite",store=>{
+      const req=store.get(String(id));
+      req.onsuccess=()=>{
+        if(!req.result)return;
+        const attempts=Math.min(12,Number(req.result.attempts||0)+1);
+        const delay=Math.min(3600,5*Math.pow(2,attempts-1));
+        store.put({...req.result,attempts,lastError:String(error||"").slice(0,300),nextAttempt:new Date(Date.now()+delay*1000).toISOString()});
+      };
+    });
+  }
+  async function deleteUnreferencedAttachments(items) {
+    const supplied=new Map();
+    for(const value of Array.isArray(items)?items:[]){
+      const item=value && typeof value==="object" ? value : {id:value};
+      const id=String(item?.id||"");
+      if(id)supplied.set(id,item);
+    }
+    const idsToCheck=[...supplied.keys()];
+    if(!idsToCheck.length)return;
+    // A duplicated place may reference the same attachment, so check all places before removing a blob.
+    const places=await transact("places","readonly",(store,done)=>{
+      const request=store.getAll();request.onsuccess=()=>done(request.result||[]);
+    });
+    const referenced=new Set(places.flatMap(place=>Array.isArray(place.attachments)?place.attachments.map(item=>String(item.id)):[]));
+    const unused=idsToCheck.filter(id=>!referenced.has(id));
+    if(!unused.length)return;
+    const db=await database();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction([MEDIA_STORE,VIDEO_DELETE_OUTBOX],"readwrite");
+      const media=tx.objectStore(MEDIA_STORE),queue=tx.objectStore(VIDEO_DELETE_OUTBOX);
+      for(const id of unused){
+        const req=media.get(id);
+        req.onsuccess=()=>{
+          const host=normalizedVideoHost(req.result?.video_host)||normalizedVideoHost(supplied.get(id)?.video_host);
+          if(host)queue.put({id:host.fileId,fileId:host.fileId,url:host.url,attachmentId:id,attempts:0,nextAttempt:"",created:timestamp(),lastError:""});
+          media.delete(id);
+        };
+      }
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error("Unable to remove unused attachment."));
+    });
+    notifySync();
+  }
+  window.FALocalStore = Object.freeze({api, database, saveAttachment, readAttachment, listAttachments, deleteUnreferencedAttachments, setAttachmentVideoHost, videoDeleteQueue, ackVideoDelete, deferVideoDelete,
     readAll, readOne, syncStatus, metadata, saveSyncCandidates, setMetadata, applyRemote, ackPending, ackRemoval, remotePlaceMetadata, removeRemotePlace, storeRemoteAttachment, queueExisting, discardLegacyNonPoiQueue});
 })();

@@ -92,13 +92,15 @@
       const filename = text(item.name || entry?.name || 'Attachment');
       const mime = text(entry?.type || item.type || '').toLowerCase();
       const kind = mime.startsWith('video/') ? 'video' : mime.startsWith('image/') ? 'image' : 'other';
-      if (!entry?.blob) {result.push({name:filename,kind,missing:true});continue;}
+      const hostedUrl=kind==='video' ? text(item?.video_host?.url || entry?.video_host?.url).trim() : '';
+      const url=/^https:\/\/drive\.google\.com\//.test(hostedUrl)?hostedUrl:'';
+      if (!entry?.blob) {result.push({name:filename,kind,missing:true,...(url?{url}:{})});continue;}
       try {
         if(kind==='image' || kind==='video') {
           const preview = kind==='video' ? await videoPoster(entry.blob) : await convertBlobToJpeg(entry.blob);
-          result.push({name:filename,kind,blob:preview.blob,width:preview.width,height:preview.height,dataUrl:await blobToDataUrl(preview.blob)});
+          result.push({name:filename,kind,blob:preview.blob,width:preview.width,height:preview.height,dataUrl:await blobToDataUrl(preview.blob),...(url?{url}:{})});
         } else result.push({name:filename,kind});
-      } catch { result.push({name:filename,kind,missing:true}); }
+      } catch { result.push({name:filename,kind,missing:true,...(url?{url}:{})}); }
     }
     return result;
   }
@@ -152,14 +154,15 @@
     // bidiVisual renders the first cell on the right in Word and LibreOffice.
     return `<w:tbl><w:tblPr><w:tblW w:w="9300" w:type="dxa"/><w:bidiVisual/>${borders}</w:tblPr><w:tr><w:trPr><w:cantSplit/></w:trPr>${cell('المنطقة',text(place.area_name).trim()||'غير متوفرة')}${cell('الإحداثيات',coordText(place),true)}</w:tr></w:tbl>`;
   }
-  function wordImage(rid,index,media) {
+  function wordImage(rid,index,media,linkRid='') {
     const maxW=5200000,maxH=4500000,ratio=Math.min(maxW/Math.max(1,media.width),maxH/Math.max(1,media.height));
     const w=Math.round(media.width*ratio),h=Math.round(media.height*ratio);
-    return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${w}" cy="${h}"/><wp:docPr id="${index}" name="Attachment ${index}" descr="${xml(media.name)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${index}" name="Attachment ${index}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+    const run=`<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${w}" cy="${h}"/><wp:docPr id="${index}" name="Attachment ${index}" descr="${xml(media.name)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${index}" name="Attachment ${index}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+    return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr>${linkRid?`<w:hyperlink r:id="${linkRid}" w:history="1">${run}</w:hyperlink>`:run}</w:p>`;
   }
   async function exportWord(report) {
     const {details,places}=report;
-    const sections=[],images=[];let imageCounter=0;
+    const sections=[],images=[],links=[];let imageCounter=0;
     sections.push(wordParagraph(`التاريخ: ${dateDisplay(details.date)}`,{bold:true}));
     sections.push(wordParagraph(`الموضوع: ${details.subject}`,{bold:true,space:500}));
     for(const line of details.intro.split(/\n\n+/))sections.push(wordParagraph(line,{space:380}));
@@ -175,7 +178,9 @@
           const id=++imageCounter;
           const bytes=new Uint8Array(await media.blob.arrayBuffer());
           images.push({id,bytes});
-          sections.push(wordImage(`rIdImg${id}`,id,media));
+          const linkRid=media.kind==='video'&&media.url?`rIdVideo${id}`:'';
+          if(linkRid)links.push({id:linkRid,url:media.url});
+          sections.push(wordImage(`rIdImg${id}`,id,media,linkRid));
         }
         sections.push(wordParagraph(`${media.kind === 'video' ? 'فيديو' : 'مرفق'}: ${media.name}${media.missing?' (تعذر إنشاء المعاينة)':''}`,{space:140}));
       }
@@ -187,7 +192,7 @@
       }
     }
     const documentXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${sections.join('')}<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1100" w:right="1220" w:bottom="1150" w:left="1220" w:header="600" w:footer="600" w:gutter="0"/></w:sectPr></w:body></w:document>`;
-    const rels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>${images.map(img=>`<Relationship Id="rIdImg${img.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${img.id}.jpg"/>`).join('')}</Relationships>`;
+    const rels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>${images.map(img=>`<Relationship Id="rIdImg${img.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${img.id}.jpg"/>`).join('')}${links.map(link=>`<Relationship Id="${link.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xml(link.url)}" TargetMode="External"/>`).join('')}</Relationships>`;
     const footer=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:fldSimple w:instr="PAGE"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>`;
     const files=[
       ['[Content_Types].xml',`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`],
@@ -209,7 +214,7 @@
     const {details,places}=report;
     const cover = `<section class="cover"><p class="date"><b>التاريخ: ${html(dateDisplay(details.date))}</b></p><p class="subject"><b>الموضوع: ${html(details.subject)}</b></p><div class="intro">${details.intro.split(/\n\n+/).map(part=>`<p>${html(part).replace(/\n/g,'<br>')}</p>`).join('')}</div>${details.sender?`<p><b>الاسم: ${html(details.sender)}</b></p>`:''}${details.contact?`<p><b>وسيلة التواصل: ${html(details.contact)}</b></p>`:''}</section>`;
     const body=places.map((p,i)=>{
-      const files=(p.reportMedia||[]).map(m=>`<figure>${m.dataUrl?`<img src="${m.dataUrl}" alt="${html(m.name)}">`:''}<figcaption>${m.kind==='video'?'فيديو: ':'مرفق: '}${html(m.name)}${m.missing?' (معاينة غير متوفرة)':''}</figcaption></figure>`).join('');
+      const files=(p.reportMedia||[]).map(m=>{const image=m.dataUrl?`<img src="${m.dataUrl}" alt="${html(m.name)}">`:'';const preview=m.kind==='video'&&m.url&&image?`<a href="${html(m.url)}" target="_blank" rel="noopener noreferrer">${image}</a>`:image;return `<figure>${preview}<figcaption>${m.kind==='video'?'فيديو: ':'مرفق: '}${html(m.name)}${m.missing?' (معاينة غير متوفرة)':''}</figcaption></figure>`;}).join('');
       const sources=validSources(p).map(src=>`<li dir="ltr">${html(src)}</li>`).join('');
       const area=html(text(p.area_name).trim()||'غير متوفرة');
       const fields=`<div class="location-fields"><div class="location-field coordinates"><div class="location-label">الإحداثيات</div><div class="location-value" dir="ltr">${html(coordText(p))}</div></div><div class="location-field area"><div class="location-label">المنطقة</div><div class="location-value" dir="rtl">${area}</div></div></div>`;
