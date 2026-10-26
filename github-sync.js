@@ -86,21 +86,27 @@
     return {sha:file.sha,plain:await decrypt(path,fromBase64(file.content))};
   }
   async function loadVideoApiKey() {
-    const saved=await readEncryptedConfig(VIDEO_KEY_PATH);
-    if(!saved)return null;
-    let payload;
-    try {payload=JSON.parse(dec.decode(saved.plain));} catch {throw new Error("Cannot read encrypted video-hosting configuration.");}
-    const key=String(payload?.key||"").trim();
-    if(payload?.v!==1 || payload?.kind!=="pt-video-api-key" || key.length<20)throw new Error("Invalid encrypted video-hosting configuration.");
-    return key;
+    try {
+      const saved=await readEncryptedConfig(VIDEO_KEY_PATH);
+      if(!saved)return null;
+      const payload=JSON.parse(dec.decode(saved.plain));
+      const key=String(payload?.key||"").trim();
+      if(payload?.v!==1 || payload?.kind!=="pt-video-api-key" || key.length<20)return null;
+      return key;
+    } catch {return null;}
   }
   async function provisionVideoApiKey(value) {
     if(!connection)throw new Error("Connect to GitHub first.");
     const key=String(value||"").trim();
     if(key.length<20)throw new Error("The video API key is invalid.");
-    const existing=await readEncryptedConfig(VIDEO_KEY_PATH);
+    let existingSha=null;
+    try {
+      const file=await request(`${baseUrl()}/contents/${VIDEO_KEY_PATH.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(connection.branch)}`);
+      if(file?.type!=="file" || !/^[a-f0-9]{40}$/i.test(file.sha||""))throw new Error("Invalid video-hosting configuration file.");
+      existingSha=file.sha;
+    } catch(error){if(error.status!==404)throw error;}
     const payload=enc.encode(JSON.stringify({v:1,kind:"pt-video-api-key",key}));
-    await writeBlob(VIDEO_KEY_PATH,payload,existing?.sha||null);
+    await writeBlob(VIDEO_KEY_PATH,payload,existingSha);
     connection.videoApiKey=key;
     return true;
   }
