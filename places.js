@@ -635,22 +635,6 @@
     const host=normalizedVideoHost(item?.video_host);
     return {id:item.id,name:item.name,type:item.type,size:item.size,...(item.fileDate?{fileDate:item.fileDate}:{}),...(host?{video_host:host}:{})};
   }
-  async function ensureHostedEditorVideos() {
-    const pending=editorAttachments.filter(item=>String(item?.type||"").toLowerCase().startsWith("video/") && !normalizedVideoHost(item.video_host));
-    if(!pending.length)return;
-    if(!window.FAGitHubSync?.snapshot?.().connected)throw new Error("Connect to GitHub before saving video attachments.");
-    showToast(`Uploading ${pending.length===1?"video copy":`${pending.length} video copies`}...`);
-    for(const item of pending){
-      const stored=await window.FALocalStore.readAttachment(item.id);
-      const existing=normalizedVideoHost(stored?.video_host);
-      if(existing){item.video_host=existing;continue;}
-      if(!(stored?.blob instanceof Blob))throw new Error(`Missing local video ${item.name||item.id}.`);
-      const host=await window.FAGitHubSync.uploadHostedVideo(stored.blob,item.name||stored.name||"video");
-      item.video_host=host;
-      await window.FALocalStore.setAttachmentVideoHost(item.id,host);
-    }
-  }
-
   function updateUntitleAttachmentButton() {
     const button = $("poi-untitle-attachments");
     button.hidden = !untitlingShiftHeld || !editorAttachments.length || addingAttachments ||
@@ -4570,9 +4554,6 @@
     }
     const colorOverride = validPoiColor($("place-color").value);
 
-    try { await ensureHostedEditorVideos(); }
-    catch (err) { showToast(`Video hosting failed: ${err.message}`); return; }
-
     const geo = serializeLayer(layer);
     const payload = {
       name: $("name").value.trim(),
@@ -4662,9 +4643,6 @@
       showToast("Custom fields must be valid JSON.");
       return;
     }
-
-    try { await ensureHostedEditorVideos(); }
-    catch (err) { showToast(`Video hosting failed: ${err.message}`); return; }
 
     const geo = serializeLayer(layer);
     const payload = {

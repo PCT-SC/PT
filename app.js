@@ -2096,19 +2096,25 @@
       const pending=await window.FALocalStore.syncStatus().then(v=>v.pending.length).catch(()=>null);
       if(version!==refreshSyncPanelVersion)return;
       const count=pending ?? info.pendingCount ?? 0;
-      const mode=!info.connected?"offline":info.error||info.conflicts?"attention":info.busy?"busy":count?"pending":"ok";
-      const label={offline:"Not connected",attention:"Sync needs attention",busy:"Syncing POIs...",pending:"Upload pending",ok:"Up to date"}[mode];
+      const drivePending=Math.max(0,Number(info.drivePending)||0);
+      const driveBusy=!!info.driveBusy;
+      const mode=!info.connected?"offline":info.error||info.conflicts?"attention":info.busy||driveBusy?"busy":count||drivePending?"pending":info.driveError?"attention":"ok";
+      const label=!info.connected?"Not connected":mode==="attention"?"Sync needs attention":driveBusy?(String(info.driveStatus||"").startsWith("Uploading")?"Uploading videos...":"Syncing Google Drive..."):info.busy?"Syncing POIs...":count||drivePending?"Upload pending":"Up to date";
       const toolbar=$("sync-toolbar-btn");
       if(toolbar){
+        const totalPending=count+drivePending;
         toolbar.dataset.state=mode;
         toolbar.setAttribute("aria-label",`${label}. Open sync status`);
-        toolbar.title=`${label}${count?` - ${count} pending POI change(s)`:""}. Click to view sync status.`;
+        const parts=[];if(count)parts.push(`${count} pending POI change(s)`);if(drivePending)parts.push(`${drivePending} pending Drive task(s)`);
+        toolbar.title=`${label}${parts.length?` - ${parts.join(", ")}`:""}. Click to view sync status.`;
         $("sync-toolbar-icon").innerHTML=mode==="ok"?syncSuccessSvg:`<i class="${syncIcons[mode]}" aria-hidden="true"></i>`;
-        const indicator=$("sync-toolbar-pending");if(indicator)indicator.hidden=!(count>0);
+        const indicator=$("sync-toolbar-pending");if(indicator)indicator.hidden=!(totalPending>0);
       }
       const connection=$("sync-view-connection");if(connection)connection.textContent=label;
       const status=$("sync-view-status");if(status)status.textContent=info.status;
+      const driveStatus=$("sync-view-drive-status");if(driveStatus){driveStatus.textContent=info.videoHosting?(info.driveStatus||"Waiting"):"Not configured";driveStatus.classList.toggle("is-busy",driveBusy);driveStatus.title=info.driveError||"";}
       const pendingField=$("sync-view-pending");if(pendingField)pendingField.textContent=pending==null?"Unavailable":String(pending);
+      const drivePendingField=$("sync-view-drive-pending");if(drivePendingField)drivePendingField.textContent=String(drivePending);
       const conflictField=$("sync-view-conflicts");if(conflictField)conflictField.textContent=String(info.conflicts||0);
       const lastSuccess=$("sync-view-last-success");if(lastSuccess){lastSuccess.textContent=formatSyncTime(info.lastSuccessAt);lastSuccess.title=info.lastSuccessAt?new Date(info.lastSuccessAt).toLocaleString():"";}
       const error=$("sync-view-error");if(error){error.textContent=info.error||"";error.hidden=!info.error;}

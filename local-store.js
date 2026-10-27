@@ -8,6 +8,7 @@
   const OUTBOX = "sync_outbox";
   const REMOTE = "sync_remote";
   const VIDEO_DELETE_OUTBOX = "video_delete_outbox";
+  const VIDEO_UPLOAD_OUTBOX = "video_upload_outbox";
   const SYNC_COLLECTIONS = ["places"];
   let opening = null;
 
@@ -18,10 +19,10 @@
         reject(new Error("IndexedDB is unavailable in this browser or browsing mode."));
         return;
       }
-      const request = indexedDB.open(DB_NAME, 4);
+      const request = indexedDB.open(DB_NAME, 5);
       request.onupgradeneeded = () => {
         const db = request.result;
-        for (const name of [...COLLECTIONS, MEDIA_STORE, OUTBOX, REMOTE, VIDEO_DELETE_OUTBOX]) {
+        for (const name of [...COLLECTIONS, MEDIA_STORE, OUTBOX, REMOTE, VIDEO_DELETE_OUTBOX, VIDEO_UPLOAD_OUTBOX]) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, {keyPath: "id"});
         }
       };
@@ -313,11 +314,105 @@
     return {provider:"gdrive",fileId,url};
   }
   async function setAttachmentVideoHost(id, host) {
+    const attachmentId=String(id);
     const normalized=normalizedVideoHost(host);
-    if(!normalized)throw new Error("Invalid hosted video metadata.");
-    await transact(MEDIA_STORE,"readwrite",store=>{
+    if(!attachmentId || !normalized)throw new Error("Invalid hosted video metadata.");
+    const db=await database();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction([MEDIA_STORE,"places",OUTBOX,VIDEO_UPLOAD_OUTBOX],"readwrite");
+      const media=tx.objectStore(MEDIA_STORE),places=tx.objectStore("places"),queue=tx.objectStore(VIDEO_UPLOAD_OUTBOX);
+      const mediaReq=media.get(attachmentId);
+      mediaReq.onsuccess=()=>{if(mediaReq.result)media.put({...mediaReq.result,video_host:clone(normalized)});};
+      const placeReq=places.getAll();
+      placeReq.onsuccess=()=>{
+        for(const place of placeReq.result||[]){
+          let changed=false;
+          const attachments=(place.attachments||[]).map(item=>{
+            if(String(item?.id||"")!==attachmentId)return item;
+            const current=normalizedVideoHost(item?.video_host);
+            if(current?.fileId===normalized.fileId && current?.url===normalized.url)return item;
+            changed=true;return {...item,video_host:clone(normalized)};
+          });
+          if(changed){const next={...place,attachments,updated:timestamp()};places.put(next);markPending(tx,"places",place.id,next);}
+        }
+      };
+      queue.delete(attachmentId);
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error("Unable to save hosted video metadata."));
+    });
+    notifySync();
+  }
+  async function clearAttachmentVideoHost(id, fileId="") {
+    const attachmentId=String(id), expected=String(fileId||"");
+    if(!attachmentId)return;
+    const db=await database();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction([MEDIA_STORE,"places",OUTBOX,VIDEO_UPLOAD_OUTBOX],"readwrite");
+      const media=tx.objectStore(MEDIA_STORE),places=tx.objectStore("places"),queue=tx.objectStore(VIDEO_UPLOAD_OUTBOX);
+      const strip=item=>{
+        const current=normalizedVideoHost(item?.video_host);
+        if(!current || (expected && current.fileId!==expected))return {item,changed:false};
+        const next={...item};delete next.video_host;return {item:next,changed:true};
+      };
+      const mediaReq=media.get(attachmentId);
+      mediaReq.onsuccess=()=>{if(mediaReq.result){const result=strip(mediaReq.result);if(result.changed)media.put(result.item);}};
+      const placeReq=places.getAll();
+      placeReq.onsuccess=()=>{
+        for(const place of placeReq.result||[]){
+          let changed=false;
+          const attachments=(place.attachments||[]).map(item=>{
+            if(String(item?.id||"")!==attachmentId)return item;
+            const result=strip(item);changed=changed||result.changed;return result.item;
+          });
+          if(changed){const next={...place,attachments,updated:timestamp()};places.put(next);markPending(tx,"places",place.id,next);}
+        }
+      };
+      queue.put({id:attachmentId,attachmentId,attempts:0,nextAttempt:"",created:timestamp(),lastError:""});
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error("Unable to reset hosted video metadata."));
+    });
+    notifySync();
+  }
+  async function videoHostInventory() {
+    const [places,media]=await Promise.all([readAll("places"),readAll(MEDIA_STORE)]);
+    const mediaById=new Map(media.map(item=>[String(item?.id||""),item]));
+    const videos=new Map();
+    for(const place of places){
+      for(const item of Array.isArray(place?.attachments)?place.attachments:[]){
+        const attachmentId=String(item?.id||"");if(!attachmentId)continue;
+        const stored=mediaById.get(attachmentId);
+        const type=String(item?.type||stored?.type||"").toLowerCase();
+        if(!type.startsWith("video/"))continue;
+        const host=normalizedVideoHost(item?.video_host)||normalizedVideoHost(stored?.video_host);
+        const existing=videos.get(attachmentId);
+        if(!existing)videos.set(attachmentId,{attachmentId,name:String(item?.name||stored?.name||"video"),type,host});
+        else if(!existing.host && host)existing.host=host;
+      }
+    }
+    const list=[...videos.values()];
+    return {videos:list,keepFileIds:[...new Set(list.map(item=>item.host?.fileId).filter(Boolean))]};
+  }
+  async function replaceVideoUploadQueue(ids) {
+    const wanted=new Set((Array.isArray(ids)?ids:[]).map(String).filter(Boolean));
+    await transact(VIDEO_UPLOAD_OUTBOX,"readwrite",(store,done)=>{
+      const req=store.getAll();
+      req.onsuccess=()=>{
+        const existing=new Map((req.result||[]).map(item=>[String(item.id),item]));
+        for(const id of existing.keys())if(!wanted.has(id))store.delete(id);
+        for(const id of wanted)if(!existing.has(id))store.put({id,attachmentId:id,attempts:0,nextAttempt:"",created:timestamp(),lastError:""});
+        done(true);
+      };
+    });
+  }
+  async function videoUploadQueue() { return readAll(VIDEO_UPLOAD_OUTBOX); }
+  async function ackVideoUpload(id) { await transact(VIDEO_UPLOAD_OUTBOX,"readwrite",store=>store.delete(String(id))); }
+  async function deferVideoUpload(id,error) {
+    await transact(VIDEO_UPLOAD_OUTBOX,"readwrite",store=>{
       const req=store.get(String(id));
-      req.onsuccess=()=>{if(req.result)store.put({...req.result,video_host:normalized});};
+      req.onsuccess=()=>{
+        if(!req.result)return;
+        const attempts=Math.min(12,Number(req.result.attempts||0)+1);
+        const delay=Math.min(3600,10*Math.pow(2,attempts-1));
+        store.put({...req.result,attempts,lastError:String(error||"").slice(0,300),nextAttempt:new Date(Date.now()+delay*1000).toISOString()});
+      };
     });
   }
   async function videoDeleteQueue() { return readAll(VIDEO_DELETE_OUTBOX); }
@@ -351,13 +446,14 @@
     if(!unused.length)return;
     const db=await database();
     await new Promise((resolve,reject)=>{
-      const tx=db.transaction([MEDIA_STORE,VIDEO_DELETE_OUTBOX],"readwrite");
-      const media=tx.objectStore(MEDIA_STORE),queue=tx.objectStore(VIDEO_DELETE_OUTBOX);
+      const tx=db.transaction([MEDIA_STORE,VIDEO_DELETE_OUTBOX,VIDEO_UPLOAD_OUTBOX],"readwrite");
+      const media=tx.objectStore(MEDIA_STORE),queue=tx.objectStore(VIDEO_DELETE_OUTBOX),uploadQueue=tx.objectStore(VIDEO_UPLOAD_OUTBOX);
       for(const id of unused){
         const req=media.get(id);
         req.onsuccess=()=>{
           const host=normalizedVideoHost(req.result?.video_host)||normalizedVideoHost(supplied.get(id)?.video_host);
           if(host)queue.put({id:host.fileId,fileId:host.fileId,url:host.url,attachmentId:id,attempts:0,nextAttempt:"",created:timestamp(),lastError:""});
+          uploadQueue.delete(id);
           media.delete(id);
         };
       }
@@ -365,6 +461,6 @@
     });
     notifySync();
   }
-  window.FALocalStore = Object.freeze({api, database, saveAttachment, readAttachment, listAttachments, deleteUnreferencedAttachments, setAttachmentVideoHost, videoDeleteQueue, ackVideoDelete, deferVideoDelete,
+  window.FALocalStore = Object.freeze({api, database, saveAttachment, readAttachment, listAttachments, deleteUnreferencedAttachments, setAttachmentVideoHost, clearAttachmentVideoHost, videoHostInventory, replaceVideoUploadQueue, videoUploadQueue, ackVideoUpload, deferVideoUpload, videoDeleteQueue, ackVideoDelete, deferVideoDelete,
     readAll, readOne, syncStatus, metadata, saveSyncCandidates, setMetadata, applyRemote, ackPending, ackRemoval, remotePlaceMetadata, removeRemotePlace, storeRemoteAttachment, queueExisting, discardLegacyNonPoiQueue});
 })();

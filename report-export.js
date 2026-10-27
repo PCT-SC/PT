@@ -104,11 +104,18 @@
     }
     return result;
   }
+  function expandIntroTokens(value, places) {
+    const list=Array.isArray(places)?places:[];
+    const locationCount=list.length;
+    const attachmentCount=list.reduce((total,place)=>total+(Array.isArray(place?.attachments)?place.attachments.length:0),0);
+    return text(value).replace(/%n/g,String(locationCount)).replace(/%a/g,String(attachmentCount));
+  }
   async function prepareReport(records, details) {
     const active = (records || []).filter(p => !p.deleted && !p.deleted_at);
+    const resolvedDetails={...details,intro:expandIntroTokens(details?.intro,active)};
     const places=[];
     for (const place of active) places.push({...place,reportMedia:await prepareMedia(place)});
-    return {places,details};
+    return {places,details:resolvedDetails};
   }
 
   // RFC 1952/ZIP store-only writer. Word accepts stored ZIP entries; JPEGs are already compressed.

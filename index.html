@@ -68,11 +68,11 @@
       <div id="map"></div>
       <div class="map-actions">
         <button id="add-btn">Add Place</button>
-        <button id="sync-toolbar-btn" class="sync-toolbar-btn" type="button" data-state="offline" aria-label="Open synchronization status" title="GitHub sync status" data-no-translate>
+        <button id="sync-toolbar-btn" class="sync-toolbar-btn" type="button" data-state="offline" aria-label="Open synchronization status" title="Sync status" data-no-translate>
           <span id="sync-toolbar-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M8.5 12.5L10.5 14.5L15.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           <span id="sync-toolbar-pending" class="sync-toolbar-dot" hidden></span>
         </button>
-        <div id="sync-popover" class="sync-popover hidden" role="dialog" aria-label="GitHub synchronization" aria-modal="false" tabindex="-1" data-no-translate>
+        <div id="sync-popover" class="sync-popover hidden" role="dialog" aria-label="Synchronization status" aria-modal="false" tabindex="-1" data-no-translate>
           <div class="sync-simple-top">
             <h3 class="sync-heading">Sync status</h3><button id="sync-popover-close" class="secondary small" type="button" title="Close" aria-label="Close Sync panel">Close</button>
           </div>
@@ -80,13 +80,18 @@
           <div class="sync-simple-status" role="status" aria-live="polite">
             <strong id="sync-view-connection">Connecting</strong>
             <span id="sync-view-status">Checking GitHub...</span>
+            <div class="sync-drive-status">
+              <span><i class="fa-brands fa-google-drive" aria-hidden="true"></i> Google Drive</span>
+              <strong id="sync-view-drive-status">Waiting</strong>
+            </div>
           </div>
           <div class="sync-simple-details">
-            <div><span>Pending</span><strong id="sync-view-pending">0</strong></div>
+            <div><span>GitHub pending</span><strong id="sync-view-pending">0</strong></div>
+            <div><span>Drive pending</span><strong id="sync-view-drive-pending">0</strong></div>
             <div><span>Conflicts</span><strong id="sync-view-conflicts">0</strong></div>
             <div><span>Last synced</span><strong id="sync-view-last-success">Not yet</strong></div>
           </div>
-          <p class="sync-note">POIs and attachments sync automatically. Checking every 30 seconds. Markups stay local.</p>
+          <p class="sync-note">POIs and attachments sync automatically. Google Drive video copies reconcile in the background. Markups stay local.</p>
           <div id="sync-view-error" class="sync-current-error" role="alert" hidden></div>
           <div class="backup-actions sync-simple-actions">
             <button id="github-sync-now-btn" class="backup-export-btn" type="button">Sync now</button>
@@ -560,17 +565,17 @@
   <script src="layers/ovp.js?v=20261025-layer-toggle-collapsed-1"></script>
   <script src="sketch.js?v=20261021-sketch-palette-6"></script>
   <script src="network.js?v=20261017-consolidated-1"></script>
-  <script src="local-store.js?v=20261027-video-hosting-1"></script>
-  <script src="github-sync.js?v=20261027-video-loginfix-2"></script>
+  <script src="local-store.js?v=20261027-video-reconcile-exact-1"></script>
+  <script src="github-sync.js?v=20261027-drive-sync-status-1"></script>
   <script src="remembered-login.js"></script>
   <script src="utilities.js?v=20261023-sidebar-oim-1"></script>
   <script src="settings.js?v=20261025-layer-grouping-1"></script>
-  <script src="places.js?v=20261027-video-hosting-1"></script>
+  <script src="places.js?v=20261027-video-reconcile-exact-1"></script>
   <script src="markup.js?v=20261021-los-1"></script>
   <script src="core.js?v=20261022-project-tracker-1"></script>
-  <script src="report-export.js?v=20261027-video-hosting-1"></script>
-  <script src="app.js?v=20261025-layer-grouping-1"></script>
-  <style>.sync-status-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.sync-updated{font-size:10px;color:#aeb6c0;text-align:right}.sync-usage{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;margin:10px 0 0;padding:9px 0;font-size:11px}.sync-usage>strong{font-size:12px;font-weight:400}.sync-usage .area-info{margin-left:0}.sync-usage .area-info-text{top:auto;bottom:calc(100% + 6px);left:auto;right:0;transform:none;width:220px;max-width:min(220px,calc(100vw - 48px));white-space:normal}.sync-usage-breakdown{display:grid;gap:4px}.sync-usage-breakdown div{display:flex;justify-content:space-between;gap:8px}.sync-advanced>summary{display:list-item}.sync-updated{white-space:nowrap}</style>
+  <script src="report-export.js?v=20261027-report-tokens-2"></script>
+  <script src="app.js?v=20261027-drive-sync-status-1"></script>
+  <style>.sync-status-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.sync-updated{font-size:10px;color:#aeb6c0;text-align:right}.sync-usage{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;margin:10px 0 0;padding:9px 0;font-size:11px}.sync-usage>strong{font-size:12px;font-weight:400}.sync-usage .area-info{margin-left:0}.sync-usage .area-info-text{top:auto;bottom:calc(100% + 6px);left:auto;right:0;transform:none;width:220px;max-width:min(220px,calc(100vw - 48px));white-space:normal}.sync-usage-breakdown{display:grid;gap:4px}.sync-usage-breakdown div{display:flex;justify-content:space-between;gap:8px}.sync-advanced>summary{display:list-item}.sync-updated{white-space:nowrap}.sync-drive-status{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:11px}.sync-drive-status>span{display:flex;align-items:center;gap:6px;color:var(--muted)}.sync-drive-status>strong{min-width:0;text-align:right;font-size:10px!important;font-weight:500!important;color:var(--text);overflow-wrap:anywhere}.sync-drive-status>strong.is-busy{color:#e1e3e5}.sync-simple-details{grid-template-columns:repeat(2,minmax(0,1fr))!important}</style>
   <script>(()=>{
     const panel=document.getElementById("sync-popover"),button=document.getElementById("sync-toolbar-btn"),box=panel.querySelector(".sync-simple-status"),name=document.getElementById("sync-view-connection");
     const head=document.createElement("div");head.className="sync-status-head";box.prepend(head);head.append(name);

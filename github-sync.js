@@ -11,7 +11,6 @@
   const POLL_MS = 30000, DEBOUNCE_MS = 900, MAX_MEDIA_BYTES = 12 * 1024 * 1024;
   const VIDEO_WORKER = "https://pt-video.cloudflaresc-aqvny-a60.workers.dev";
   const VIDEO_KEY_PATH = "research/config/video-api.bin";
-  const VIDEO_CHUNK_BYTES = 8 * 1024 * 1024;
   let lastMediaSnapshot = "";
   // References are trusted only for the exact encrypted Git blob SHA.
   // They never contain attachment bytes or original filenames.
@@ -38,8 +37,19 @@
   function emitProgress(percent,detail) { try { onProgress({percent,detail}); } catch {} }
   let status = "Not connected", remoteFiles = new Map(), lastError = "";
   let lastAttemptAt=null, lastCheckAt=null, lastSuccessAt=null, conflicts=0, pendingCount=0;
-  const snapshot = () => ({connected:!!connection, videoHosting:!!connection?.videoApiKey, busy:!!syncing, status, error:lastError, lastAttemptAt, lastCheckAt, lastSuccessAt, conflicts, pendingCount, pollSeconds:POLL_MS/1000});
-  function setStatus(message,error="") { status=message;lastError=error;try{onStatus(snapshot());}catch{} }
+  let driveStatus="Not configured",driveBusy=false,drivePending=0,driveError="";
+  const snapshot = () => ({connected:!!connection, videoHosting:!!connection?.videoApiKey, busy:!!syncing, status, error:lastError, lastAttemptAt, lastCheckAt, lastSuccessAt, conflicts, pendingCount, driveBusy, driveStatus, drivePending, driveError, pollSeconds:POLL_MS/1000});
+  function notifyStatus(){try{onStatus(snapshot());}catch{}}
+  function setStatus(message,error="") { status=message;lastError=error;notifyStatus(); }
+  function setDriveStatus(message,{busy=driveBusy,pending=drivePending,error=""}={}) {
+    driveStatus=String(message||"");driveBusy=!!busy;drivePending=Math.max(0,Number(pending)||0);driveError=String(error||"");notifyStatus();
+  }
+  async function finishDriveStatus(message="Google Drive up to date") {
+    const [uploads,deletes]=await Promise.all([storage.videoUploadQueue().catch(()=>[]),storage.videoDeleteQueue().catch(()=>[])]);
+    const pending=uploads.length+deletes.length;
+    const last=[...uploads,...deletes].map(item=>String(item?.lastError||"")).filter(Boolean).pop()||"";
+    setDriveStatus(pending?`${pending} Google Drive task${pending===1?"":"s"} pending`:message,{busy:false,pending,error:last});
+  }
   const toBase64 = bytes => { let result="";for(let i=0;i<bytes.length;i+=0x8000) result+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return btoa(result); };
   const fromBase64 = text => Uint8Array.from(atob(text.replace(/\s/g,"")),c=>c.charCodeAt(0));
   const filePath = (name,id) => `research/${name}/${id}.bin`;
@@ -119,71 +129,131 @@
     if(!response.ok){const error=new Error(String(data?.error||`Video hosting HTTP ${response.status}`));error.status=response.status;error.remoteStatus=Number(data?.status)||0;throw error;}
     return data||{};
   }
-  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  function uploadedOffset(response,fallback) {
-    const range=response.headers.get("Range")||"";
-    const match=/(?:bytes=)?\d+-(\d+)$/.exec(range);
-    return match?Number(match[1])+1:fallback;
-  }
-  async function queryVideoUpload(sessionUrl,total) {
-    const response=await fetch(sessionUrl,{method:"PUT",headers:{"Content-Range":`bytes */${total}`}});
-    if(response.ok)return {done:true,file:await response.json()};
-    if(response.status===308)return {done:false,offset:uploadedOffset(response,0)};
-    const error=new Error(`Google Drive upload status HTTP ${response.status}`);
-    error.restart=response.status===404 || response.status===410 || (response.status>=400 && response.status<500 && response.status!==429);
-    throw error;
-  }
-  async function uploadVideoSession(sessionUrl,blob,onProgress) {
-    let offset=0,retries=0;
-    while(offset<blob.size){
-      const end=Math.min(offset+VIDEO_CHUNK_BYTES,blob.size);
-      let response=null;
-      try {response=await fetch(sessionUrl,{method:"PUT",headers:{"Content-Range":`bytes ${offset}-${end-1}/${blob.size}`},body:blob.slice(offset,end)});} catch {}
-      if(response?.status===308){offset=uploadedOffset(response,end);retries=0;if(onProgress)onProgress(offset/blob.size);continue;}
-      if(response?.ok){if(onProgress)onProgress(1);return response.json();}
-      if(response && response.status>=400 && response.status<500 && response.status!==429){const error=new Error(`Google Drive upload HTTP ${response.status}`);error.restart=true;throw error;}
-      if(++retries>4)throw new Error("Google Drive video upload could not be resumed.");
-      await wait(Math.min(8000,500*Math.pow(2,retries-1)));
-      try {
-        const status=await queryVideoUpload(sessionUrl,blob.size);
-        if(status.done){if(onProgress)onProgress(1);return status.file;}
-        offset=status.offset;
-      } catch(error){if(error.restart)throw error;}
-    }
-    throw new Error("Google Drive video upload did not complete.");
-  }
-  async function uploadHostedVideo(blob,name,onProgress=null) {
+  async function uploadHostedVideo(blob,name,attachmentId,onProgress=null) {
     if(!(blob instanceof Blob) || !String(blob.type||"").toLowerCase().startsWith("video/"))throw new Error("Invalid video attachment.");
-    for(let attempt=0;attempt<3;attempt++){
-      const session=await videoApi("/api/upload/start",{name:String(name||"video").slice(0,240),mimeType:blob.type,size:blob.size});
-      if(!/^https:\/\/www\.googleapis\.com\//.test(String(session.sessionUrl||"")))throw new Error("Video host returned an invalid upload session.");
-      try {
-        const file=await uploadVideoSession(session.sessionUrl,blob,onProgress);
-        const fileId=String(file?.id||"");
-        if(!/^[A-Za-z0-9_-]{10,200}$/.test(fileId))throw new Error("Google Drive did not return a valid video file ID.");
-        try {
-          const shared=await videoApi("/api/share",{fileId});
-          const url=String(shared?.url||"");
-          if(!/^https:\/\/drive\.google\.com\//.test(url))throw new Error("Video host did not return a valid viewing link.");
-          return {provider:"gdrive",fileId,url};
-        } catch(error){try{await videoApi("/api/delete",{fileId});}catch{}throw error;}
-      } catch(error){if(error.restart && attempt<2)continue;throw error;}
-    }
-    throw new Error("Google Drive video upload failed.");
+    if(blob.size<=0 || blob.size>MAX_MEDIA_BYTES)throw new Error(`Video must be between 1 byte and ${MAX_MEDIA_BYTES/1024/1024} MiB.`);
+    const mediaId=String(attachmentId||"");
+    if(!/^[A-Za-z0-9._-]{8,200}$/.test(mediaId))throw new Error("Invalid video attachment ID.");
+    if(!connection?.videoApiKey)throw new Error("Video hosting is not configured for this research repository.");
+    if(onProgress)onProgress(0);
+    const url=`${VIDEO_WORKER}/api/upload?name=${encodeURIComponent(String(name||"video").slice(0,240))}&size=${encodeURIComponent(blob.size)}&attachmentId=${encodeURIComponent(mediaId)}`;
+    const data=await new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      xhr.open("POST",url,true);
+      xhr.setRequestHeader("Authorization",`Bearer ${connection.videoApiKey}`);
+      xhr.setRequestHeader("Content-Type",blob.type);
+      xhr.upload.onprogress=event=>{if(onProgress&&event.lengthComputable&&event.total>0)onProgress(event.loaded/event.total);};
+      xhr.onerror=()=>reject(new Error("Video hosting service is unavailable."));
+      xhr.onload=()=>{
+        let payload=null;try{payload=JSON.parse(xhr.responseText||"null");}catch{}
+        if(xhr.status>=200&&xhr.status<300){resolve(payload||{});return;}
+        const error=new Error(String(payload?.error||`Video hosting HTTP ${xhr.status}`));error.status=xhr.status;error.remoteStatus=Number(payload?.status)||0;reject(error);
+      };
+      xhr.send(blob);
+    });
+    const fileId=String(data?.fileId||""),viewUrl=String(data?.url||"");
+    if(!/^[A-Za-z0-9_-]{10,200}$/.test(fileId) || !/^https:\/\/drive\.google\.com\//.test(viewUrl))throw new Error("Video host returned invalid file metadata.");
+    if(onProgress)onProgress(1);
+    return {provider:"gdrive",fileId,url:viewUrl};
   }
   let videoDeleteRunning=null;
   async function processHostedVideoDeletes() {
     if(videoDeleteRunning || !connection?.videoApiKey)return videoDeleteRunning;
     const session=connection;
     videoDeleteRunning=(async()=>{
-      for(const item of await storage.videoDeleteQueue()){
+      const items=await storage.videoDeleteQueue();
+      let index=0;
+      for(const item of items){
         if(connection!==session)break;
         const due=Date.parse(item.nextAttempt||"");if(Number.isFinite(due)&&due>Date.now())continue;
-        try {await videoApi("/api/delete",{fileId:item.fileId});await storage.ackVideoDelete(item.id);}
+        index++;
+        setDriveStatus(`Removing unused Drive video ${index} of ${items.length}...`,{busy:true,pending:Math.max(drivePending,items.length-index+1),error:""});
+        try {await videoApi("/api/delete",{fileId:item.fileId});await storage.ackVideoDelete(item.id);drivePending=Math.max(0,drivePending-1);notifyStatus();}
         catch(error){if(error.remoteStatus===404)await storage.ackVideoDelete(item.id);else await storage.deferVideoDelete(item.id,error.message);}
       }
     })().finally(()=>{videoDeleteRunning=null;});
     return videoDeleteRunning;
+  }
+  let videoUploadRunning=null,videoReconcileRunning=null,videoWorkTimer=null;
+  async function processHostedVideoUploads() {
+    if(videoUploadRunning || !connection?.videoApiKey)return videoUploadRunning;
+    const session=connection;
+    videoUploadRunning=(async()=>{
+      const items=await storage.videoUploadQueue();
+      let index=0;
+      for(const item of items){
+        if(connection!==session)break;
+        const due=Date.parse(item.nextAttempt||"");if(Number.isFinite(due)&&due>Date.now())continue;
+        index++;
+        const attachmentId=String(item.attachmentId||item.id||"");
+        try {
+          const inventory=await storage.videoHostInventory();
+          const target=inventory.videos.find(video=>video.attachmentId===attachmentId);
+          if(!target || target.host){await storage.ackVideoUpload(item.id);continue;}
+          const stored=await storage.readAttachment(attachmentId);
+          if(!(stored?.blob instanceof Blob))throw new Error(`Video attachment ${attachmentId} is not available locally yet.`);
+          const remaining=Math.max(1,items.length-index+1);
+          setDriveStatus(`Uploading video ${index} of ${items.length} · 0%`,{busy:true,pending:Math.max(drivePending,remaining),error:""});
+          const host=await uploadHostedVideo(stored.blob,target.name||stored.name||"video",attachmentId,progress=>{
+            if(connection===session)setDriveStatus(`Uploading video ${index} of ${items.length} · ${Math.round(Math.max(0,Math.min(1,Number(progress)||0))*100)}%`,{busy:true,pending:Math.max(drivePending,remaining),error:""});
+          });
+          if(connection!==session){try{await videoApi("/api/delete",{fileId:host.fileId});}catch{}break;}
+          await storage.setAttachmentVideoHost(attachmentId,host);
+          drivePending=Math.max(0,drivePending-1);notifyStatus();
+        } catch(error){
+          if(connection!==session)break;
+          await storage.deferVideoUpload(item.id,error?.message||"Video upload failed");
+          setDriveStatus(`Video upload failed; retry queued`,{busy:false,pending:Math.max(1,drivePending),error:error?.message||"Video upload failed"});
+        }
+      }
+    })().finally(()=>{videoUploadRunning=null;});
+    return videoUploadRunning;
+  }
+  async function reconcileHostedVideos(fullAudit=false) {
+    if(videoReconcileRunning || !connection?.videoApiKey)return videoReconcileRunning;
+    const session=connection;
+    setDriveStatus(fullAudit?"Checking Google Drive videos...":"Checking video hosting...",{busy:true,pending:drivePending,error:""});
+    videoReconcileRunning=(async()=>{
+      let inventory=await storage.videoHostInventory();
+      if(fullAudit){
+        try {
+          setDriveStatus(`Reconciling ${inventory.videos.length} video attachment${inventory.videos.length===1?"":"s"} with Google Drive...`,{busy:true,pending:drivePending,error:""});
+          const remote=await videoApi("/api/reconcile",{attachments:inventory.videos.map(video=>({attachmentId:video.attachmentId,fileId:video.host?.fileId||""}))});
+          if(connection!==session)return;
+          const remoteByAttachment=new Map((Array.isArray(remote?.videos)?remote.videos:[]).map(item=>[String(item?.attachmentId||""),item]));
+          for(const video of inventory.videos){
+            const remoteVideo=remoteByAttachment.get(video.attachmentId);
+            if(remoteVideo){
+              const fileId=String(remoteVideo.fileId||""),url=String(remoteVideo.url||"");
+              if(/^[A-Za-z0-9_-]{10,200}$/.test(fileId) && /^https:\/\/drive\.google\.com\//.test(url) &&
+                (!video.host || video.host.fileId!==fileId || video.host.url!==url)){
+                await storage.setAttachmentVideoHost(video.attachmentId,{provider:"gdrive",fileId,url});
+              }
+            } else if(video.host) {
+              await storage.clearAttachmentVideoHost(video.attachmentId,video.host.fileId);
+            }
+          }
+          inventory=await storage.videoHostInventory();
+        } catch(error) {
+          setDriveStatus("Google Drive reconciliation failed",{busy:false,pending:drivePending,error:error?.message||"Google Drive reconciliation failed"});
+        }
+      }
+      if(connection!==session)return;
+      const missing=inventory.videos.filter(video=>!video.host).map(video=>video.attachmentId);
+      await storage.replaceVideoUploadQueue(missing);
+      const deletes=await storage.videoDeleteQueue().catch(()=>[]);
+      drivePending=missing.length+deletes.length;
+      notifyStatus();
+      await processHostedVideoUploads();
+      try{await processHostedVideoDeletes();}catch{}
+      if(connection===session)await finishDriveStatus();
+    })().finally(()=>{videoReconcileRunning=null;});
+    return videoReconcileRunning;
+  }
+  function queueHostedVideoWork() {
+    if(!connection||!active)return;
+    clearTimeout(videoWorkTimer);
+    videoWorkTimer=setTimeout(()=>void reconcileHostedVideos(false),1200);
   }
   async function listTree() {
     const url=`${baseUrl()}/git/trees/${encodeURIComponent(connection.branch)}?recursive=1`;
@@ -549,6 +619,7 @@
       const details=await request(`${baseUrl()}`);
       if(!details.private)throw new Error("Only private GitHub repositories are supported to avoid exposing research metadata.");
       connection.videoApiKey=await loadVideoApiKey();
+      driveStatus=connection.videoApiKey?"Waiting for map to load":"Not configured";driveBusy=false;drivePending=0;driveError="";notifyStatus();
       emitProgress(17,"Checking encrypted research files");
       // Validate the passphrase by decrypting existing data before enabling uploads.
       await pull((completed,total)=>{
@@ -582,10 +653,10 @@
     }
     return {total,groups,last:commit.commit?.committer?.date||commit.commit?.author?.date||null};
   }
-  function startBackgroundTransfers(){mediaPrefetchStarted=true;startMediaPrefetch();void processHostedVideoDeletes();queueSoon();}
-  function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();pendingMedia.clear();mediaPrefetchStarted=false;clearInterval(pollTimer);clearTimeout(delayTimer);setStatus("Not connected - browser cache available");}
+  function startBackgroundTransfers(){mediaPrefetchStarted=true;startMediaPrefetch();if(connection?.videoApiKey)setDriveStatus("Starting Google Drive reconciliation...",{busy:true,pending:drivePending,error:""});void reconcileHostedVideos(true);queueSoon();}
+  function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();pendingMedia.clear();mediaPrefetchStarted=false;clearInterval(pollTimer);clearTimeout(delayTimer);clearTimeout(videoWorkTimer);driveStatus="Not configured";driveBusy=false;drivePending=0;driveError="";setStatus("Not connected - browser cache available");}
   function onVisibility(){if(document.visibilityState==="visible")void sync();}
-  window.addEventListener("pt-local-change",queueSoon);
+  window.addEventListener("pt-local-change",()=>{queueSoon();queueHostedVideoWork();});
   document.addEventListener("visibilitychange",onVisibility);
   window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,startBackgroundTransfers,repoInfo,snapshot,uploadHostedVideo,provisionVideoApiKey,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
 })();
