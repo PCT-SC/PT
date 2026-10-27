@@ -2186,12 +2186,6 @@ $("github-forget-login-btn")?.addEventListener("click",async()=>{
       try{await window.PTRememberedLogin.clear();window.FAGitHubSync.disconnect();window.location.reload();}
       catch(e){showToast(`Could not clear the saved login: ${e.message}`,"error");}
     });
-    $("github-publish-local-btn")?.addEventListener("click",async()=>{
-      if(!window.FAGitHubSync.snapshot().connected){showToast("Connect to GitHub first.","error");return;}
-      if(!window.confirm("Publish existing browser POIs and their attachments to the encrypted GitHub repository? Sketches and measurements remain local. Review POIs before sharing."))return;
-      try{const count=await window.FAGitHubSync.publishExisting();showToast(`${count} existing POIs queued for encrypted sync.`,"success");window.FAGitHubSync.queueSoon();}
-      catch(e){showToast(`Publish failed: ${e.message}`,"error");}
-    });
     $("trash-btn").addEventListener("click", () => setTrashMode(!state.trashMode));
     window.addEventListener("resize", updateMapViewportForSidebar);
     $("sidebar-toggle").addEventListener("click", () => {

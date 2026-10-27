@@ -95,7 +95,6 @@
           <div id="sync-view-error" class="sync-current-error" role="alert" hidden></div>
           <div class="backup-actions sync-simple-actions">
             <button id="github-sync-now-btn" class="backup-export-btn" type="button">Sync now</button>
-            <button id="github-publish-local-btn" class="backup-export-btn" type="button">Publish existing POIs</button>
           </div>
 <details class="sync-advanced"><summary>Connection options</summary>
             <p class="sync-note">Saved login is stored in this browser.</p>
@@ -574,7 +573,7 @@
   <script src="markup.js?v=20261021-los-1"></script>
   <script src="core.js?v=20261022-project-tracker-1"></script>
   <script src="report-export.js?v=20261027-report-tokens-2"></script>
-  <script src="app.js?v=20261027-syncnow-drive-1"></script>
+  <script src="app.js?v=20261027-no-publish-1"></script>
   <style>.sync-status-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.sync-updated{font-size:10px;color:#aeb6c0;text-align:right}.sync-usage{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;margin:10px 0 0;padding:9px 0;font-size:11px}.sync-usage>strong{font-size:12px;font-weight:400}.sync-usage .area-info{margin-left:0}.sync-usage .area-info-text{top:auto;bottom:calc(100% + 6px);left:auto;right:0;transform:none;width:220px;max-width:min(220px,calc(100vw - 48px));white-space:normal}.sync-usage-breakdown{display:grid;gap:4px}.sync-usage-breakdown div{display:flex;justify-content:space-between;gap:8px}.sync-advanced>summary{display:list-item}.sync-updated{white-space:nowrap}.sync-drive-status{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:11px}.sync-drive-status>span{display:flex;align-items:center;gap:6px;color:var(--muted)}.sync-drive-status>strong{min-width:0;text-align:right;font-size:10px!important;font-weight:500!important;color:var(--text);overflow-wrap:anywhere}.sync-drive-status>strong.is-busy{color:#e1e3e5}.sync-simple-details{grid-template-columns:repeat(2,minmax(0,1fr))!important}</style>
   <script>(()=>{
     const panel=document.getElementById("sync-popover"),button=document.getElementById("sync-toolbar-btn"),box=panel.querySelector(".sync-simple-status"),name=document.getElementById("sync-view-connection");
