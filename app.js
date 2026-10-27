@@ -2178,7 +2178,7 @@
         closeSyncPopover();syncButton?.focus();event.stopPropagation();
       }
     });
-    $("github-sync-now-btn")?.addEventListener("click",()=>void window.FAGitHubSync.sync());
+    $("github-sync-now-btn")?.addEventListener("click",()=>void window.FAGitHubSync.syncNow());
 $("github-forget-login-btn")?.addEventListener("click",async()=>{
       if(window.FAGitHubSync.snapshot().busy){showToast("A sync is in progress. Try again when it finishes.","error");return;}
       const pending=(await window.FALocalStore.syncStatus()).pending.length;

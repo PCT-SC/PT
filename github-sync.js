@@ -654,9 +654,10 @@
     return {total,groups,last:commit.commit?.committer?.date||commit.commit?.author?.date||null};
   }
   function startBackgroundTransfers(){mediaPrefetchStarted=true;startMediaPrefetch();if(connection?.videoApiKey)setDriveStatus("Starting Google Drive reconciliation...",{busy:true,pending:drivePending,error:""});void reconcileHostedVideos(true);queueSoon();}
+  async function syncNow(){await sync();if(connection?.videoApiKey)await reconcileHostedVideos(true);}
   function disconnect(){active=false;needsResync=false;connection=null;remoteFiles.clear();verifiedPlaceRefs.clear();pendingMedia.clear();mediaPrefetchStarted=false;clearInterval(pollTimer);clearTimeout(delayTimer);clearTimeout(videoWorkTimer);driveStatus="Not configured";driveBusy=false;drivePending=0;driveError="";setStatus("Not connected - browser cache available");}
   function onVisibility(){if(document.visibilityState==="visible")void sync();}
   window.addEventListener("pt-local-change",()=>{queueSoon();queueHostedVideoWork();});
   document.addEventListener("visibilitychange",onVisibility);
-  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,queueSoon,downloadMedia,startBackgroundTransfers,repoInfo,snapshot,uploadHostedVideo,provisionVideoApiKey,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
+  window.FAGitHubSync=Object.freeze({connect,disconnect,sync,syncNow,queueSoon,downloadMedia,startBackgroundTransfers,repoInfo,snapshot,uploadHostedVideo,provisionVideoApiKey,setHandlers:(a,b,c)=>{onChange=a||onChange;onStatus=b||onStatus;onProgress=c||onProgress;}, publishExisting:storage.queueExisting});
 })();
