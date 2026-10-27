@@ -2263,6 +2263,18 @@ $("github-forget-login-btn")?.addEventListener("click",async()=>{
         setGotoCoordinatesOpen(!$("goto-controls").classList.contains("goto-open"));
       }
     });
+    ["status-sketch-btn", "status-goto-btn"].forEach(id => {
+      const button = $(id);
+      button.addEventListener("keydown", event => event.stopPropagation());
+    });
+    $("status-sketch-btn").addEventListener("click", event => {
+      event.stopPropagation();
+      window.FASketch?.toggle?.();
+    });
+    $("status-goto-btn").addEventListener("click", event => {
+      event.stopPropagation();
+      setGotoCoordinatesOpen(true);
+    });
     $("invert-crosshair-toggle").addEventListener("change", event => {
       state.invertCrosshair = event.target.checked;
       $("map-center-crosshair").classList.toggle("inverted", state.invertCrosshair);

@@ -1802,6 +1802,7 @@ if (this.options.pane === 'fa-native-queryExtentPane') this._map.off('move', thi
   function setGotoCoordinatesOpen(open) {
     const isOpen = Boolean(open);
     const controls = $("goto-controls");
+    const shortcutButton = $("status-goto-btn");
     if (controls._gotoHideTimer) {
       clearTimeout(controls._gotoHideTimer);
       controls._gotoHideTimer = null;
@@ -1813,6 +1814,7 @@ if (this.options.pane === 'fa-native-queryExtentPane') this._map.off('move', thi
       String(isOpen || quickMeasurementsOpen)
     );
     if (isOpen) {
+      shortcutButton?.classList.add("hidden");
       positionGotoCoordinates();
       controls.classList.remove("goto-open");
       controls.classList.remove("hidden");
@@ -1823,6 +1825,7 @@ if (this.options.pane === 'fa-native-queryExtentPane') this._map.off('move', thi
       controls.classList.remove("goto-open");
       controls._gotoHideTimer = setTimeout(() => {
         controls.classList.add("hidden");
+        shortcutButton?.classList.remove("hidden");
         controls._gotoHideTimer = null;
       }, 200);
     }

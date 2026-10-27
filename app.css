@@ -2783,4 +2783,28 @@ outline: 2px solid #505050;
 .map-wrap.fa-layer-ungrouped:not(.fa-layer-ungrouped-open) .worldcover-legend-info { visibility: hidden !important; pointer-events: none !important; }
 #sync-popover .sync-advanced>summary::after { content: none !important; display: none !important; }
 #sync-popover .sync-advanced-chevron { margin-left: auto; font-size: 10px; line-height: 1; color: var(--muted); }
-
+#add-btn,
+#sync-toolbar-btn,
+#basemap-toggle,
+#config-btn,
+#overpass-toggle,
+.fa-layer-choice,
+.fa-layer-ungrouped-toggle,
+.satellite-brightness-info-button,
+.tool-settings-info-button,
+.worldcover-legend-info,
+.status-side-btn { border-radius: 0 !important; }
+.tool-settings-info-button,
+#osm-brightness-info-button,
+#satellite-brightness-info-button,
+.worldcover-legend-info { position: relative; }
+.tool-settings-info-button > .worldcover-legend-glyph,
+#osm-brightness-info-button > .worldcover-legend-glyph,
+#satellite-brightness-info-button > .worldcover-legend-glyph,
+.worldcover-legend-info > .worldcover-legend-glyph { position: absolute !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; }
+.status-side-btn { position: absolute; z-index: 2; top: 50%; width: 30px; min-width: 30px; height: 30px; padding: 0; display: grid; place-items: center; transform: translateY(-50%); background: rgba(23,23,23,.92); color: var(--muted); border: 1px solid var(--border); }
+.status-side-btn:hover { color: var(--text); border-color: #626262; }
+.status-side-btn i { font-size: 12px; line-height: 1; pointer-events: none; }
+.status-sketch-btn { right: calc(100% + 9px); }
+.status-goto-btn { left: calc(100% + var(--status-zoom-extension, 0px) + 9px); }
+.status-goto-btn.hidden { display: none !important; }
