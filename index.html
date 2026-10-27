@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/geoman/leaflet-geoman.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-  <link rel="stylesheet" href="app.css?v=20261025-layer-toggle-arrow-fine-1">
+  <link rel="stylesheet" href="app.css?v=20261027-report-key-2">
 </head>
 <body>
   <div id="boot-screen" class="boot-screen hidden" data-state="loading" lang="en" dir="ltr" data-no-translate>
@@ -318,6 +318,7 @@
             <label>Contact method (optional) <input id="report-export-contact" autocomplete="off" placeholder="وسيلة التواصل"></label>
             <label>Subject <input id="report-export-subject" dir="rtl"></label>
             <label>Introduction <textarea id="report-export-intro" dir="rtl" rows="9"></textarea></label>
+            <div class="report-export-token-key" dir="rtl"><span dir="ltr">%n</span> = عدد المواقع&nbsp;&nbsp;·&nbsp;&nbsp;<span dir="ltr">%a</span> = عدد المرفقات</div>
             <div class="report-export-actions">
               <button class="backup-export-btn" id="report-export-confirm" type="submit">Create report</button>
               <button class="backup-export-btn" id="report-export-cancel" type="button">Cancel</button>
@@ -572,7 +573,7 @@
   <script src="places.js?v=20261027-video-reconcile-exact-1"></script>
   <script src="markup.js?v=20261021-los-1"></script>
   <script src="core.js?v=20261022-project-tracker-1"></script>
-  <script src="report-export.js?v=20261027-report-tokens-2"></script>
+  <script src="report-export.js?v=20261027-report-intro-4"></script>
   <script src="app.js?v=20261027-no-publish-1"></script>
   <style>.sync-status-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.sync-updated{font-size:10px;color:#aeb6c0;text-align:right}.sync-usage{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;margin:10px 0 0;padding:9px 0;font-size:11px}.sync-usage>strong{font-size:12px;font-weight:400}.sync-usage .area-info{margin-left:0}.sync-usage .area-info-text{top:auto;bottom:calc(100% + 6px);left:auto;right:0;transform:none;width:220px;max-width:min(220px,calc(100vw - 48px));white-space:normal}.sync-usage-breakdown{display:grid;gap:4px}.sync-usage-breakdown div{display:flex;justify-content:space-between;gap:8px}.sync-advanced>summary{display:list-item}.sync-updated{white-space:nowrap}.sync-drive-status{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:11px}.sync-drive-status>span{display:flex;align-items:center;gap:6px;color:var(--muted)}.sync-drive-status>strong{min-width:0;text-align:right;font-size:10px!important;font-weight:500!important;color:var(--text);overflow-wrap:anywhere}.sync-drive-status>strong.is-busy{color:#e1e3e5}.sync-simple-details{grid-template-columns:repeat(2,minmax(0,1fr))!important}</style>
   <script>(()=>{

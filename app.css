@@ -2615,6 +2615,7 @@ outline: 2px solid #505050;
 .report-export-panel input, .report-export-panel textarea { width:100%; min-width:0; max-width:100%; box-sizing:border-box; padding:7px 8px; border:1px solid var(--border); border-radius:3px; background:#181818; color:var(--text); font:12px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 .report-export-panel input:focus, .report-export-panel textarea:focus {outline:none;box-shadow:none;border-color:var(--border);}
 .report-export-panel textarea { resize:vertical; min-height:155px; line-height:1.65; }
+.report-export-token-key { margin-top:-6px; color:var(--muted); opacity:.7; font-size:10px; font-weight:400; line-height:1.35; }
 .report-export-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; }
 
 /* GitHub gateway */
