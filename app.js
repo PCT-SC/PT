@@ -3154,6 +3154,17 @@ $("github-forget-login-btn")?.addEventListener("click",async()=>{
     $("search").addEventListener("change", rerenderSearch);
     $("search").addEventListener("search", rerenderSearch);
     $("search").addEventListener("keyup", rerenderSearch);
+    $("search").addEventListener("keydown", event => {
+      if (event.key !== "Enter") return;
+      const value = event.currentTarget.value;
+      const parsed = parseCoordinateInput(value, state.map.getCenter());
+      if (!parsed || !Number.isFinite(parsed.lat) || !Number.isFinite(parsed.lon)
+        || Math.abs(parsed.lat) > 85.05112878 || Math.abs(parsed.lon) > 180) return;
+      event.preventDefault();
+      $("goto-coords").value = value;
+      goToCoordinates();
+      event.currentTarget.blur();
+    });
     $("category-filter").addEventListener("change", () => {
       renderList();
       updatePoiVisibility();
